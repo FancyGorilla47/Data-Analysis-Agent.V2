@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dashboard (Static) + Chatbot</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@2.4.0/dist/purify.min.js"></script>
+    <style>
+      :root {
+        --radius: 14px;
+        --ring: rgba(0, 0, 0, 0.08);
+        --peek: 44px;
+        --log-bg: #2d333b;
+        --log-text: #cdd9e5;
+        --fab-h: 40px;
+        --fab-radius: 12px;
+        --fab-pad: 0px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: #0b132b;
+      }
+
+      .page {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        object-fit: contain;
+        display: block;
+        background: #0b132b;
+      }
+
+      /* FAB (rectangular image) */
+      .fab {
+        position: fixed;
+        right: 22px;
+        bottom: 22px; 
+        padding: var(--fab-pad);
+        border: 0;
+        border-radius: var(--fab-radius);
+        background: transparent;
+        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
+        cursor: pointer;
+        overflow: visible;
+        display: inline-block;
+        z-index: 1100;
+        transition: transform 0.1s ease;
+      }
+      .fab:active {
+        transform: scale(0.97);
+      }
+      .fab.hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transform: scale(0.9);
+        transition: opacity 0.12s, transform 0.12s, visibility 0s linear 0.12s;
+      }
+      .fab-img {
+        display: block;
+        height: var(--fab-h);
+        width: auto;
+        object-fit: contain;
+        border-radius: var(--fab-radius);
+      }
+
+      /* Chat - Minimized View */
+      .chat {
+        position: fixed;
+        right: 22px;
+        bottom: 90px;
+        width: 360px;
+        height: 60vh;
+        max-height: 700px;
+        background: #fff;
+        color: #0b1020;
+        border-radius: var(--radius);
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+        border: 1px solid #e5e7eb;
+        display: none;
+        flex-direction: column;
+        overflow: hidden;
+        z-index: 1050;
+      }
+      .chat.open {
+        display: flex;
+        animation: slideIn 0.18s ease-out;
+      }
+      @keyframes slideIn {
+        from {
+          transform: translateY(8px);
+          opacity: 0;
+        }
+        to {
+          transform: none;
+          opacity: 1;
+        }
+      }
+
+      /* Header with tabs */
+      .chat header {
+        height: 48px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 10px;
+        border-bottom: 1px solid #eef2f7;
+        background: #fff;
+        flex-shrink: 0;
+      }
+      .tabs {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .tab-btn {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px;
+        border: 0;
+        background: transparent;
+        border-radius: 8px;
+        cursor: pointer;
+        font: 600 14px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+        color: #111827;
+      }
+      .tab-btn:hover {
+        background: #f3f4f6;
+      }
+      .tab-btn .tab-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #cbd5e1;
+      }
+      .tab-btn.active .tab-dot {
+        background: #22d3ee;
+      }
+      .tab-divider {
+        width: 1px;
+        height: 18px;
+        background: #e5e7eb;
+      }
+      .controls {
+        margin-left: auto;
+        display: inline-flex;
+        gap: 8px;
+      }
+      .icon-btn {
+        appearance: none;
+        border: 0;
+        background: transparent;
+        cursor: pointer;
+        padding: 6px;
+        border-radius: 8px;
+      }
+      .icon-btn:hover {
+        background: #f2f4f7;
+      }
+
+      /* Body: panes + console */
+      .chat-body {
+        display: flex;
+        min-height: 0;
+        flex: 1;
+      }
+      .pane {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-width: 0;
+        background: #fafbfc;
+      }
+      .pane[hidden] {
+        display: none !important;
+      }
+      .messages {
+        padding: 12px 14px;
+        overflow: auto;
+        flex: 1;
+        background: #fafbfc;
+      }
+      
+      .msg {
+        padding: 10px 12px;
+        border-radius: 12px;
+        margin: 6px 0;
+        font: 14px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+        width: -moz-fit-content;
+        width: fit-content; 
+      }
+      .msg.bot {
+        background: #eef2f7;
+        max-width: 85%;
+      }
+      .msg.me {
+        background: #dcfce7;
+        margin-left: auto;
+        max-width: 450px;
+      }
+      .status {
+        text-align: center;
+        padding: 6px 5px;
+        color: #6c757d;
+        font-size: 0.85em;
+        min-height: 1.5em;
+        background: #eef2f7;
+        border-top: 1px solid #e5e7eb;
+        border-bottom: 1px solid #e5e7eb;
+      }
+      .chat form {
+        display: flex;
+        gap: 8px;
+        padding: 10px;
+        border-top: 1px solid #eef2f7;
+        background: #fff;
+      }
+      .chat input[type="text"] {
+        flex: 1;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid #e5e7eb;
+        font-size: 14px;
+        outline: none;
+      }
+      .chat input[type="text"]:focus {
+        border-color: #22d3ee;
+        box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.25);
+      }
+      .chat button.send {
+        padding: 10px 14px;
+        border: 0;
+        border-radius: 10px;
+        background: #0ea5e9;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .chat .newchat {
+        border: 0;
+        background: transparent;
+        color: #0ea5e9;
+        font-weight: 600;
+        padding: 0 8px;
+      }
+
+      /* Console (logs) */
+      .console {
+        width: 34%;
+        min-width: 340px;
+        max-width: 520px;
+        background: var(--log-bg);
+        color: var(--log-text);
+        display: none;
+        flex-direction: column;
+        border-left: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      .console.visible {
+        display: flex;
+      }
+      .console .log-header {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        padding: 8px 12px;
+        background: #3e444b;
+        color: #fff;
+        font-size: 0.9rem;
+      }
+      #log-box {
+        flex: 1;
+        overflow: auto;
+        padding: 12px;
+        font-family: "Courier New", Courier, monospace;
+        font-size: 0.85em;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .log-message {
+        padding-bottom: 5px;
+        border-bottom: 1px solid #444c56;
+        margin-bottom: 5px;
+      }
+      .log-message:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+      }
+      :root {
+        --radius: 14px;
+        --ring: rgba(0, 0, 0, 0.08);
+        --peek: 44px;
+        /* ... other variables ... */
+
+        /* === ADD THESE VARIABLES FOR MAXIMIZED POSITIONING === */
+        /* These are your tuning knobs. Adjust them to fit your image. */
+        --max-top-offset: 4.5%;      /* Adjust to move the window up or down */
+        --max-horizontal-margin: 4.8%; /* Adjust to make the window wider or narrower */
+      }
+      /* Max - MODIFIED FOR FRAME EFFECT */
+      /* Max - NEW VERSION FOR FITTING INSIDE THE IMAGE */
+.chat.max {
+  /* Use variables for top and sides */
+  top: var(--max-top-offset);
+  left: var(--max-horizontal-margin);
+  right: var(--max-horizontal-margin);
+
+  /* Use a fixed value for the bottom to restore the original height */
+  bottom: 16px; 
+
+  /* Reset width/height so the positioning properties above take full control */
+  width: auto;
+  height: auto;
+
+  /* Keep the existing frame styles */
+  max-height: none;
+  border-radius: 18px;
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  padding: 16px;
+}
+      
+      /* --- INNER CONTENT STYLES START HERE --- */
+
+      /* 4. Rounds the corners of the header and content pane inside the frame. */
+      .chat.max header,
+      .chat.max .pane {
+          border-radius: 12px;
+      }
+
+      /* 5. Adds a visual gap between the header and the chat body. */
+      .chat.max header {
+          margin-bottom: 16px;
+      }
+      
+      /* This styles the inner content to sit inside the frame */
+      .chat.max header,
+      .chat.max .pane {
+          border-radius: 12px;
+      }
+
+      .chat.max header {
+          margin-bottom: 16px;
+      }
+
+      .chat.max .console.visible {
+        display: flex;
+      }
+
+      @media (max-width: 900px) {
+        .console {
+          display: none !important;
+        }
+      }
+      @media (max-width: 640px) {
+        .chat {
+          right: 12px;
+          bottom: 84px;
+          width: min(96vw, 420px);
+          height: 60vh;
+        }
+        .fab {
+          right: 12px;
+          bottom: 12px;
+        }
+      }
+      
+      .summary-container {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        width: 100%;
+      }
+      .summary-text {
+        flex-grow: 1;
+      }
+      .play-tts-btn {
+        flex-shrink: 0;
+        margin-top: 8px;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        border: 1px solid #e5e7eb;
+        background-color: #fff;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background-color 0.2s, box-shadow 0.2s;
+      }
+      .play-tts-btn:hover {
+        background-color: #f9fafb;
+      }
+      .play-tts-btn:focus {
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.3);
+      }
+      .play-tts-btn.playing svg {
+        animation: pulse 1.5s infinite;
+      }
+      @keyframes pulse {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.1); }
+        100% { transform: scale(1); }
+      }
+
+      /* Recommendations */
+      .recommendations {
+          padding: 8px 10px;
+          background: #fafbfc;
+          border-bottom: 1px solid #eef2f7;
+          display: none;
+          flex-direction: row; /* Horizontal layout */
+          gap: 8px;
+          align-items: stretch; /* Make all buttons the same height */
+      }
+      
+      .chat.max .recommendations {
+          display: flex;
+      }
+      .recommendation-btn {
+          flex: 1; /* Each button takes up equal space */
+          min-width: 0; /* Allows buttons to shrink */
+          white-space: normal; /* Allow text to wrap */
+          text-align: left;
+          padding: 8px 12px;
+          border: 1px solid #e5e7eb;
+          background: #fff;
+          border-radius: 10px;
+          font-size: 13px;
+          color: #374151;
+          cursor: pointer;
+          line-height: 1.4;
+          transition: background-color 0.2s, box-shadow 0.2s, transform 0.1s;
+      }
+      .recommendation-btn:hover {
+          background-color: #f9fafb;
+          border-color: #d1d5db;
+      }
+
+      .recommendation-btn:active {
+          transform: scale(0.98);
+          background-color: #f3f4f6;
+      }
+      .recommendation-btn {
+    border-left: 5px solid #286393; /* Deep Navy Blue */
+    transition: background-color 0.2s, border-color 0.2s;
+      }
+
+    .recommendation-btn:hover {
+        background-color: #7c95aa; /* Very light blue for hover */
+      }
+      .messages table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 12px 0;
+        font-size: 14px;
+        line-height: 1.4;
+    }
+
+    .messages th,
+    .messages td {
+        border: 1px solid #e2e8f0; /* light gray border */
+        padding: 8px 12px;
+        text-align: left;
+    }
+
+    .messages th {
+        background-color: #f8fafc; /* very light background for headers */
+        font-weight: 600;
+        color: #1a202c;
+    }
+
+    .messages tr:nth-child(even) {
+        background-color: #fdfdfe; /* Subtle stripe for readability */
+    }
+
+    .messages table p {
+        margin: 0; /* Remove default paragraph margin inside table cells */
+    }
+    </style>
+    
+</head>
+
+<body>
+    <img class="page" src="dashboard.png" alt="Dashboard Screenshot" />
+
+    <button class="fab" id="fab" aria-label="Open chatbot" title="Chat">
+      <img src="askai.png" alt="Ask AI" class="fab-img" />
+    </button>
+
+    <aside class="chat" id="chat" aria-hidden="true">
+      <header>
+        <nav class="tabs" role="tablist" aria-label="Assistant tabs">
+          <button
+            class="tab-btn active"
+            data-tab="ask"
+            role="tab"
+            aria-selected="true"
+            aria-controls="pane-ask"
+          >
+            <span class="tab-dot" aria-hidden="true"></span><span>Ask AI</span>
+          </button>
+          <div class="tab-divider" aria-hidden="true"></div>
+          <button
+            class="tab-btn"
+            data-tab="summary"
+            role="tab"
+            aria-selected="false"
+            aria-controls="pane-summary"
+          >
+            <span class="tab-dot" aria-hidden="true"></span><span>Summary</span>
+          </button>
+        </nav>
+        <div class="controls">
+          <button
+            class="icon-btn"
+            id="newChatButton"
+            title="New Chat / Refresh"
+            aria-label="New Chat"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
+              />
+            </svg>
+          </button>
+          <button
+            class="icon-btn"
+            id="logsBtn"
+            title="Show/Hide Logs"
+            aria-label="Logs"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm3.5 6.5 2.5 2.5-2.5 2.5-1.5-1.5 1-1-1-1 1.5-1.5zM11 15h5v2h-5v-2z"
+              />
+            </svg>
+          </button>
+          <button
+            class="icon-btn"
+            id="maximizeBtn"
+            title="Maximize / Restore"
+            aria-label="Maximize"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                d="M7 3h4v2H9v2H7V3zm10 0v4h-2V5h-2V3h4zM7 17h2v2h2v2H7v-4zm10 0h-2v2h-2v2h4v-4z"
+              />
+            </svg>
+          </button>
+          <button
+            class="icon-btn"
+            id="closeBtn"
+            title="Close"
+            aria-label="Close"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                d="M18.3 5.71 12 12.01l-6.29-6.3-1.41 1.42L10.59 13l-6.3 6.29 1.42 1.41L12 14.41l6.29 6.3 1.41-1.42L13.41 13l6.3-6.29-1.41-1.41z"
+              />
+            </svg>
+          </button>
+        </div>
+          <button
+            class="icon-btn"
+            id="maximizeBtn"
+            title="Maximize / Restore"
+            aria-label="Maximize"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                d="M7 3h4v2H9v2H7V3zm10 0v4h-2V5h-2V3h4zM7 17h2v2h2v2H7v-4zm10 0h-2v2h-2v2h4v-4z"
+              />
+            </svg>
+          </button>
+          <button
+            class="icon-btn"
+            id="closeBtn"
+            title="Close"
+            aria-label="Close"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                d="M18.3 5.71 12 12.01l-6.29-6.3-1.41 1.42L10.59 13l-6.3 6.29 1.42 1.41L12 14.41l6.29 6.3 1.41-1.42L13.41 13l6.3-6.29-1.41-1.41z"
+              />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="chat-body">
+        <section
+          class="pane"
+          id="pane-ask"
+          role="tabpanel"
+          aria-labelledby="Ask AI"
+        >
+          <div class="messages" id="messages">
+            <div class="msg bot">
+              Hello Khaled! How can I assist with your data analysis today?
+            </div>
+          </div>
+          <div class="status" id="status">Ready.</div>
+          <div class="recommendations" id="recommendationsContainer">
+             <button class="recommendation-btn">What projects in my sector are at risk of missing their startegic targets?</button>
+             <button class="recommendation-btn">Which indicators have improved the most last month, quarter, year and which have declined? take into consideration 2022 to 2024</button>
+             <button class="recommendation-btn">Highlight anomalies in my sector indicators. Show me a pattern, on the months there is decline or increase.</button>
+             <button class="recommendation-btn">Which indicators have crossed their thresholds and require immediate attention?</button>
+          </div>
+          <form id="chatForm" autocomplete="off">
+            <input type="text" id="chatInput" placeholder="Ask a question…" />
+            <button class="send" id="sendButton" type="submit">Send</button>
+          </form>
+        </section>
+
+        <section
+          class="pane"
+          id="pane-summary"
+          role="tabpanel"
+          aria-labelledby="Summary"
+          hidden
+        >
+          <div class="messages" id="summaryBox">
+            <div class="msg bot">No summary yet.</div>
+          </div>
+        </section>
+
+        <aside class="console" id="console">
+          <div class="log-header"><h3>Execution Logs</h3></div>
+          <div id="log-box"></div>
+        </aside>
+      </div>
+    </aside>
+
+    <script>
+      /* ===== element refs ===== */
+      const fab = document.getElementById("fab");
+      const chat = document.getElementById("chat");
+      const maximizeBtn = document.getElementById("maximizeBtn");
+      const closeBtn = document.getElementById("closeBtn");
+      const logsBtn = document.getElementById("logsBtn");
+
+      // Tabs
+      const tabs = document.querySelectorAll(".tab-btn");
+      const paneAsk = document.getElementById("pane-ask");
+      const paneSummary = document.getElementById("pane-summary");
+      let activeTab = "ask";
+
+      // Ask AI elements
+      const chatbox = document.getElementById("messages");
+      const input = document.getElementById("chatInput");
+      const sendButton = document.getElementById("sendButton");
+      const newChatButton = document.getElementById("newChatButton");
+      const statusDiv = document.getElementById("status");
+      const recommendationsContainer = document.getElementById("recommendationsContainer");
+
+
+      // Summary pane
+      const summaryBox = document.getElementById("summaryBox");
+
+      // Console
+      const consolePanel = document.getElementById("console");
+      const logBox = document.getElementById("log-box");
+
+      /* ===== open/close ===== */
+      function openChat() {
+        chat.classList.add("open");
+        chat.setAttribute("aria-hidden", "false");
+        fab.classList.add("hidden");
+        if (window.innerWidth < 560) chat.classList.add("max");
+        setTab(activeTab);
+        input.focus();
+      }
+      function closeChat() {
+        chat.classList.remove("open", "max");
+        chat.setAttribute("aria-hidden", "true");
+        hideLogs();
+        fab.classList.remove("hidden");
+      }
+      fab.addEventListener("click", openChat);
+      closeBtn.addEventListener("click", closeChat);
+
+      maximizeBtn.addEventListener("click", () => {
+        chat.classList.toggle("max");
+        if (!chat.classList.contains("max")) {
+          hideLogs();
+        }
+      });
+
+      window.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && chat.classList.contains("open")) closeChat();
+      });
+
+      /* ===== tabs ===== */
+      function setTab(tab) {
+        activeTab = tab;
+        tabs.forEach((btn) => {
+          const on = btn.dataset.tab === tab;
+          btn.classList.toggle("active", on);
+          btn.setAttribute("aria-selected", on ? "true" : "false");
+        });
+        paneAsk.hidden = tab !== "ask";
+        paneSummary.hidden = tab !== "summary";
+        // Logs only belong to Ask AI
+        if (tab !== "ask") hideLogs();
+        logsBtn.style.visibility = tab === "ask" ? "visible" : "hidden";
+      }
+      tabs.forEach((btn) =>
+        btn.addEventListener("click", () => setTab(btn.dataset.tab))
+      );
+
+      /* ===== Logs behavior ===== */
+      function showLogs() {
+        if (activeTab !== "ask") setTab("ask");
+        if (!chat.classList.contains("max")) chat.classList.add("max");
+        consolePanel.classList.add("visible");
+      }
+      function hideLogs() {
+        consolePanel.classList.remove("visible");
+      }
+      logsBtn.addEventListener("click", () => {
+        if (consolePanel.classList.contains("visible")) hideLogs();
+        else showLogs();
+      });
+      
+      /* ===== Recommendations ===== */
+      recommendationsContainer.addEventListener('click', (e) => {
+          if (e.target.classList.contains('recommendation-btn')) {
+              // Re-create the full question from a shortened version if needed, or just use the text.
+              const questions = {
+                  "Projects at risk of missing targets?": "What projects in my sector are at risk of missing their strategic targets?",
+                  "Which indicators have improved or declined?": "Which indicators have improved the most last month, quarter, year and which have declined? take into consideration 2022 to 2024",
+                  "Highlight anomalies in my sector indicators.": "Highlight anomalies in my sector indicators (unexpected spikes or drops). Show me a pattern, on the months there is decline or increase.",
+                  "Indicators needing immediate attention?": "Which indicators have crossed their thresholds and require immediate attention?"
+              };
+              const questionText = e.target.textContent;
+              const fullQuestion = questions[questionText] || questionText;
+              input.value = fullQuestion;
+              handleSend();
+          }
+      });
+
+
+      /* ===== Chat streaming (Ask AI) ===== */
+      let currentSessionId = null;
+      let latestAnswerMarkdown = ""; // keep the full latest answer for summarization
+
+      function addMessage(content, sender) {
+        const el = document.createElement("div");
+        el.className = `msg ${sender === "user" ? "me" : "bot"}`;
+        el.textContent = content;
+        chatbox.appendChild(el);
+        debounceScroll(chatbox);
+        return el;
+      }
+      function addLogMessage(content) {
+        const el = document.createElement("div");
+        el.className = "log-message";
+        el.textContent = content;
+        logBox.appendChild(el);
+        debounceScroll(logBox);
+      }
+      const scrollTimeouts = {};
+      function debounceScroll(el) {
+        const id = el.id || Math.random();
+        clearTimeout(scrollTimeouts[id]);
+        scrollTimeouts[id] = setTimeout(() => {
+          el.scrollTop = el.scrollHeight;
+        }, 50);
+      }
+
+      newChatButton.addEventListener("click", () => {
+        currentSessionId = null;
+        chatbox.innerHTML =
+          '<div class="msg bot">Hello! How can I assist with your data analysis today?</div>';
+        logBox.innerHTML = "";
+        summaryBox.innerHTML = '<div class="msg bot">No summary yet.</div>';
+        statusDiv.textContent = "Ready.";
+        sendButton.disabled = false;
+        input.disabled = false;
+        input.focus();
+      });
+
+      async function handleSend() {
+        const query = input.value.trim();
+        if (!query || sendButton.disabled) return;
+
+        addMessage(query, "user");
+        input.value = "";
+        sendButton.disabled = true;
+        input.disabled = true;
+
+        const botDiv = document.createElement("div");
+        botDiv.classList.add("msg", "bot");
+        chatbox.appendChild(botDiv);
+        debounceScroll(chatbox);
+
+        try {
+          const response = await fetch("/ask_sql", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query, session_id: currentSessionId }),
+          });
+          if (!response.ok)
+            throw new Error(
+              (await response.text()) || `Network error: ${response.status}`
+            );
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            let boundary = buffer.indexOf("\n\n");
+            while (boundary !== -1) {
+              const packet = buffer.substring(0, boundary);
+              buffer = buffer.substring(boundary + 2);
+
+              let eventName = "data",
+                eventData = "";
+              for (const line of packet.split("\n")) {
+                if (line.startsWith("event:")) eventName = line.slice(6).trim();
+                else if (line.startsWith("data:"))
+                  eventData = line.slice(5).trim();
+              }
+
+              if (eventData) {
+                try {
+                  const json = JSON.parse(eventData);
+                  switch (eventName) {
+                    case "log":
+                      addLogMessage(json.message);
+                      break;
+                    case "status":
+                      statusDiv.textContent = json.message;
+                      break;
+                    case "data":
+                      latestAnswerMarkdown = json.answer || ""; // keep full text for summary
+                      botDiv.innerHTML = DOMPurify.sanitize(
+                        marked.parse(latestAnswerMarkdown)
+                      );
+                      break;
+                    case "error":
+                      botDiv.innerHTML = `<span style="color:#d9534f;">${json.message}</span>`;
+                      statusDiv.textContent = "Error occurred";
+                      break;
+                    case "end":
+                      currentSessionId = json.session_id;
+                      statusDiv.textContent = "Ready.";
+                      // kick off summarization of the latest answer (async, does not block UI)
+                      if (latestAnswerMarkdown?.trim())
+                        summarizeLatest(latestAnswerMarkdown);
+                      break;
+                  }
+                } catch (e) {
+                  console.error("SSE parse failed:", e, eventData);
+                }
+              }
+              boundary = buffer.indexOf("\n\n");
+            }
+            debounceScroll(chatbox);
+            debounceScroll(logBox);
+          }
+        } catch (err) {
+          botDiv.innerHTML = `<span style="color:#d9534f;font-weight:600;">An error occurred:</span><br>${err.message}`;
+          statusDiv.textContent = "Error occurred";
+        } finally {
+          sendButton.disabled = false;
+          input.disabled = false;
+          input.focus();
+          debounceScroll(chatbox);
+          debounceScroll(logBox);
+        }
+      }
+
+      document.getElementById("chatForm").addEventListener("submit", (e) => {
+        e.preventDefault();
+        handleSend();
+      });
+      input.addEventListener("keypress", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          handleSend();
+        }
+      });
+      
+      let currentAudio = null;
+      let currentPlayingButton = null;
+
+      async function playTTS(text, button) {
+          if (currentAudio && !currentAudio.paused) {
+              currentAudio.pause();
+              currentAudio.currentTime = 0;
+              if (currentPlayingButton) {
+                  currentPlayingButton.classList.remove("playing");
+              }
+              if (currentPlayingButton === button) {
+                  currentPlayingButton = null;
+                  currentAudio = null;
+                  return; 
+              }
+          }
+
+          try {
+              button.classList.add("playing");
+              currentPlayingButton = button;
+
+              const response = await fetch("/tts", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ text }),
+              });
+
+              if (!response.ok) {
+                  throw new Error(`TTS service failed: ${response.status}`);
+              }
+
+              const blob = await response.blob();
+              const audioUrl = URL.createObjectURL(blob);
+              currentAudio = new Audio(audioUrl);
+              currentAudio.play();
+
+              currentAudio.onended = () => {
+                  button.classList.remove("playing");
+                  currentPlayingButton = null;
+                  currentAudio = null;
+                  URL.revokeObjectURL(audioUrl);
+              };
+              currentAudio.onerror = () => {
+                  console.error("Audio playback error.");
+                  button.classList.remove("playing");
+                  currentPlayingButton = null;
+                   URL.revokeObjectURL(audioUrl);
+              }
+
+          } catch (error) {
+              console.error("Failed to play TTS:", error);
+              button.classList.remove("playing");
+              currentPlayingButton = null;
+          }
+      }
+
+      async function summarizeLatest(text) {
+          const sumDiv = document.createElement("div");
+          sumDiv.className = "msg bot";
+          sumDiv.textContent = "Summarizing…";
+          summaryBox.innerHTML = "";
+          summaryBox.appendChild(sumDiv);
+
+          try {
+              const res = await fetch("/summarize", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", "Accept": "application/json" },
+                  body: JSON.stringify({ text }),
+              });
+
+              if (!res.ok) throw new Error((await res.text()) || `Network error: ${res.status}`);
+
+              const j = await res.json();
+              const summaryText = j.summary || j.text || j.answer || "No summary produced.";
+
+              sumDiv.innerHTML = `
+                  <div class="summary-container">
+                      <div class="summary-text">${DOMPurify.sanitize(marked.parse(summaryText))}</div>
+                      <button class="play-tts-btn" aria-label="Play summary">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                      </button>
+                  </div>
+              `;
+
+              const playButton = sumDiv.querySelector('.play-tts-btn');
+              playButton.addEventListener('click', () => playTTS(summaryText, playButton));
+
+
+          } catch (err) {
+              sumDiv.innerHTML = `<span style="color:#d9534f;">Failed to summarize: ${err.message}</span>`;
+          } finally {
+              debounceScroll(summaryBox);
+          }
+      }
+      
+      window.addEventListener("resize", () => {
+        if (chat.classList.contains("open") && window.innerWidth < 560) {
+          chat.classList.add("max");
+          if (!consolePanel.classList.contains("visible")) hideLogs();
+        }
+      });
+    </script>
+</body>
+</html>
+
