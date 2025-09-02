@@ -1,0 +1,259 @@
+{
+  "tables": [    
+    {
+  "table_name": "Tourism_Indicator_Details",
+  "description": "Stores the performance metrics for tourism-related Key Performance Indicators (KPIs) over time. Each row represents a single data point for an indicator at a specific interval.",
+  "columns": [
+    {
+      "column_name": "MainIndicatorNameEN",
+      "data_type": "string",
+      "description": "The unique, primary English name for the Key Performance Indicator (KPI). Use this column to identify and filter for specific indicators."
+    },
+    {
+      "column_name": "MainIndicatorNameAR",
+      "data_type": "string",
+      "description": "The unique, primary Arabic name for the KPI."
+    },
+    {
+      "column_name": "SourceNameEN",
+      "data_type": "string",
+      "description": "The English name of the source of the data for this indicator (e.g., 'Qatar Tourism')."
+    },
+    {
+      "column_name": "SourceNameAR",
+      "data_type": "string",
+      "description": "The Arabic name of the source of the data for this indicator."
+    },
+    {
+      "column_name": "StrategicTarget",
+      "data_type": "number",
+      "description": "The long-term, STRATEGIC target value for the indicator, which is planned to be achieved by the 'TargetYear'."
+    },
+    {
+      "column_name": "TargetYear",
+      "data_type": "integer",
+      "description": "The year by which the long-term 'TargetValue' is expected to be achieved."
+    },
+    {
+      "column_name": "BaseLineValue",
+      "data_type": "number",
+      "description": "The starting value of the indicator in the 'BaseLineYear', used for long-term comparison against 'TargetValue'."
+    },
+    {
+      "column_name": "BaseLineYear",
+      "data_type": "integer",
+      "description": "The starting year for the 'BaseLineValue'."
+    },
+    {
+      "column_name": "UnitEN",
+      "data_type": "string",
+      "description": "The English unit of measurement for the 'Actual', 'Target', 'TargetValue', and 'BaseLineValue' columns (e.g., 'bn QAR', '%', 'Million'). This unit should always be displayed with any numerical value from the row."
+    },
+    {
+      "column_name": "UnitAR",
+      "data_type": "string",
+      "description": "The Arabic unit of measurement."
+    },
+    {
+      "column_name": "Format",
+      "data_type": "string",
+      "description": "A display format code that dictates how numerical values in the row should be presented. For example: '0' means display as a whole number; '0.0m' means display the value in millions with one decimal place."
+    },
+    {
+      "column_name": "IndicatorType",
+      "data_type": "string",
+      "description": "The classification of the KPI. Must be one of the specified values.",
+      "sample_values": [
+        "sectorindicator",
+        "programindicator"
+      ]
+    },
+    {
+      "column_name": "Interval",
+      "data_type": "string",
+      "description": "The time frequency at which the indicator is measured (e.g., Quarterly, Monthly).",
+      "sample_values": [
+        "Quarterly",
+        "Monthly",
+        "Yearly"
+      ]
+    },
+    {
+      "column_name": "IntervalValue",
+      "data_type": "string",
+      "description": "The specific time period for this data record. Formats are 'YYYY-Q#' for Quarterly or 'YYYY-MM' for Monthly. This should be converted to a standard date for sorting and time-based filtering."
+    },
+    {
+      "column_name": "Actual",
+      "data_type": "number",
+      "description": "The actual measured value ('what really happened') of the indicator for the specific 'IntervalValue'."
+    },
+    {
+      "column_name": "OperationalTarget",
+      "data_type": "number",
+      "description": "The short-term, OPERATIONAL target value ('what was planned') for the specific 'IntervalValue'. This should be compared with the 'Actual' value to gauge performance for that period."
+    }
+  ]
+},
+ {
+  "table_name": "Tourism_Program_Details",
+  "description": "Stores denormalized details for tourism programs and their associated projects. IMPORTANT: Each row represents a single detail (a milestone, risk, or recommendation) for a project, meaning a single project can have multiple rows. Queries aggregating project-level data (like budgets) MUST first get a DISTINCT list of projects to avoid incorrect, inflated calculations.",
+  "columns": [
+    {
+      "column_name": "ProgramNameEN",
+      "data_type": "string",
+      "description": "The English name of the parent program that contains one or more projects."
+    },
+    {
+      "column_name": "ProgramNameAR",
+      "data_type": "string",
+      "description": "The Arabic name of the parent program."
+    },
+    {
+      "column_name": "StatusEN",
+      "data_type": "string",
+      "description": "The current status of the entire Program.",
+      "sample_values": [
+        "OnTrack",
+        "requiresattention"
+      ]
+    },
+    {
+      "column_name": "StatusAR",
+      "data_type": "string",
+      "description": "The current status of the entire Program in Arabic."
+    },
+    {
+      "column_name": "AllocatedAmount",
+      "data_type": "number",
+      "description": "The total allocated budget for the entire Program specified in 'ProgramNameEN'."
+    },
+    {
+      "column_name": "RemainingBudget",
+      "data_type": "number",
+      "description": "The remaining budget for the entire Program."
+    },
+    {
+      "column_name": "ObjectiveEN",
+      "data_type": "string",
+      "description": "The strategic objective of the Program. Values like 'Stg 1' likely refer to 'Stage 1'."
+    },
+    {
+      "column_name": "ObjectiveAR",
+      "data_type": "string",
+      "description": "The strategic objective of the Program in Arabic."
+    },
+    {
+      "column_name": "ProjectNameEN",
+      "data_type": "string",
+      "description": "The English name of the project. A project is part of a Program. Note that a single project name can appear in multiple rows."
+    },
+    {
+      "column_name": "ProjectNameAR",
+      "data_type": "string",
+      "description": "The Arabic name of the project."
+    },
+    {
+      "column_name": "ProjectStatusEN",
+      "data_type": "string",
+      "description": "The current status of the Project.",
+      "sample_values": [
+        "OnTrack",
+        "OffTrack",
+        "requiresattention"
+      ]
+    },
+    {
+      "column_name": "ProjectStatusAR",
+      "data_type": "string",
+      "description": "The current status of the Project in Arabic."
+    },
+    {
+      "column_name": "ProjectObjectiveEN",
+      "data_type": "string",
+      "description": "The specific objective of the Project."
+    },
+    {
+      "column_name": "ProjectObjectiveAR",
+      "data_type": "string",
+      "description": "The specific objective of the Project in Arabic."
+    },
+    {
+      "column_name": "ProjectSupportingEntityEN",
+      "data_type": "string",
+      "description": "The name of the external or internal entity supporting the project."
+    },
+    {
+      "column_name": "ProjectSupportingEntityAR",
+      "data_type": "string",
+      "description": "The Arabic name of the entity supporting the project."
+    },
+    {
+      "column_name": "ProjectDetailUpdateEN",
+      "data_type": "string",
+      "description": "A detailed text update on the project's progress."
+    },
+    {
+      "column_name": "ProjectDetailUpdateAR",
+      "data_type": "string",
+      "description": "A detailed text update on the project's progress in Arabic."
+    },
+    {
+      "column_name": "ProjectSummaryUpdateEN",
+      "data_type": "string",
+      "description": "A summary of the project's status at the time of the interval. This is scraped data and may contain HTML tags like '<p>' that might need to be cleaned before display."
+    },
+    {
+      "column_name": "ProjectSummaryUpdateAR",
+      "data_type": "string",
+      "description": "A summary of the project's status in Arabic, may also contain HTML tags."
+    },
+    {
+      "column_name": "ProjectHighlightInterval",
+      "data_type": "date",
+      "description": "The date when the assessment for the data in this specific row was performed."
+    },
+    {
+      "column_name": "ProjectAllocatedAmount",
+      "data_type": "number",
+      "description": "The allocated budget for the specific 'ProjectNameEN'. WARNING: Because a project appears in multiple rows, summing this column directly will produce an incorrect, inflated number. To calculate total project budgets, you must first get a DISTINCT list of projects and their budgets, and then sum the result."
+    },
+    {
+      "column_name": "ProjectRemainingBudget",
+      "data_type": "number",
+      "description": "The remaining budget for the specific 'ProjectNameEN'. This value is also repeated across multiple rows for the same project."
+    },
+    {
+      "column_name": "ProjectMileStoneEN",
+      "data_type": "string",
+      "description": "A specific milestone associated with the project for this row."
+    },
+    {
+      "column_name": "ProjectMileStoneAR",
+      "data_type": "string",
+      "description": "A specific milestone associated with the project for this row in Arabic."
+    },
+    {
+      "column_name": "ProjectRiskEN",
+      "data_type": "string",
+      "description": "A specific risk identified for the project for this row."
+    },
+    {
+      "column_name": "ProjectRiskAR",
+      "data_type": "string",
+      "description": "A specific risk identified for the project for this row in Arabic."
+    },
+    {
+      "column_name": "ProjectRecommendatationEN",
+      "data_type": "string",
+      "description": "A specific recommendation made for the project for this row."
+    },
+    {
+      "column_name": "ProjectRecommendationAR",
+      "data_type": "string",
+      "description": "A specific recommendation made for the project for this row in Arabic."
+    }
+  ]
+}
+  ]
+}
