@@ -4,7 +4,6 @@ python-dotenv
 pydantic
 sqlalchemy
 pyodbc
-langchain
 langchain-community
 langchain-openai
 langgraph
@@ -12,16 +11,20 @@ pandas
 numpy
 azure-search-documents
 azure-core
+azure-identity
+tiktoken
+# ---- Twilio ---
+twilio
+gunicorn
+python-multipart
+# --- Additional Analytical Libraries ---
 scipy
+statsmodels
+scikit-learn
+xgboost
+lightgbm
+python-dateutil
+cerberus
 tabulate
 prettytable
 texttable
-python-dateutil
-cerberus
-openai
-tiktoken
-azure-identity
-# --- Twilio ---
-twilio>=9,<10
-gunicorn>=21.2,<22
-python-multipart

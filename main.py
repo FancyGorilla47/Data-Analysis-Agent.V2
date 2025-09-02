@@ -5,10 +5,10 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-import traceback
-import ast
 import asyncio
-from langchain_community.agent_toolkits.sql.base import create_sql_agent
+import builtins
+import traceback
+from contextlib import redirect_stdout
 from contextlib import contextmanager
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, text
@@ -50,8 +50,6 @@ from twilio.request_validator import RequestValidator
 #--- end 
 
 ####################  added  twilio  ##################
-
-
 
 # --- 1. Initialization (Runs once on server start) ---
 load_dotenv()
@@ -109,10 +107,14 @@ class AgentState(TypedDict):
     # where the first inner list is the headers.
     sql_results: Annotated[List[Dict[str, Any]], operator.add]
     analysis_summary: str
+    python_last_failed_code: str | None 
     python_notebook: Annotated[List[str], operator.add]
+    python_retry_count: int
     python_error: str | None  
     final_data: List[Dict[str, Any]] | None
     final_report: str
+    sql_error: str | None
+    sql_retry_count: int
 
 class StreamingStdOut(io.StringIO):
     """A custom StringIO class that writes to an asyncio.Queue and the original stdout."""
@@ -139,41 +141,34 @@ def redirect_stdout_to_queue(queue: asyncio.Queue):
         yield
     finally:
         sys.stdout = original_stdout
-# Check essential environment variables
-required_vars = [
-    "AZURE_OPENAI_API_VERSION",
-    "AZURE_OPENAI_CHAT_DEPLOYMENT_NAME",
-    "AZURE_SQL_CONNECTION_STRING",
-    "AZURE_OPENAI_API_KEY",
-    "AZURE_OPENAI_ENDPOINT"
-]
-for var in required_vars:
-    if not os.getenv(var):
-        raise RuntimeError(f"Missing required environment variable: {var}")
+
 
 # 1a) Azure OpenAI clients
 try:
-    openai_agent_llm = AzureChatOpenAI(
-        openai_api_version=os.environ["AZURE_OPENAI_API_VERSION"],
-        azure_deployment=os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT_NAME"],
-        streaming=False,
-        temperature=0
+    openai_O1_llm = AzureChatOpenAI(
+        openai_api_version=os.environ["AZURE_OPENAI_API_VERSION_o1"],
+        azure_deployment=os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT_NAME_O1"],
+        streaming=False
     )
     print("Azure OpenAI Agent LLM (for tool calling) initialized.")
 
-    openai_refiner_llm = AzureChatOpenAI(
-        openai_api_version=os.environ["AZURE_OPENAI_API_VERSION"],
-        azure_deployment=os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT_NAME"],
+    openai_O3_llm = AzureChatOpenAI(
+        openai_api_version=os.environ["AZURE_OPENAI_API_VERSION_O3_MINI"],
+        azure_deployment=os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT_NAME_O3_MINI"],
         streaming=True,
-        temperature=0
     )
     print("Azure OpenAI Refiner LLM initialized.")
+    openai_GPT4_llm = AzureChatOpenAI(
+        openai_api_version=os.environ["AZURE_OPENAI_API_VERSION_GPT4"],
+        azure_deployment=os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT_NAME_GPT4"],
+        streaming=False
+    )
 except Exception as e:
     print(f"Error initializing Azure OpenAI clients: {e}")
     raise
 
 from summary import create_summary_agent_and_router, _extract_output_text
-summary_agent_executor, summary_router = create_summary_agent_and_router(openai_refiner_llm)
+summary_agent_executor, summary_router = create_summary_agent_and_router(openai_O3_llm)
 app.include_router(summary_router)
 
 
@@ -187,7 +182,7 @@ db_uri = f"mssql+pyodbc:///?odbc_connect={quoted_conn_str}"
 engine = create_engine(db_uri, echo=False)
 embeddings = AzureOpenAIEmbeddings(
     azure_deployment=os.environ["AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT_NAME"],
-    openai_api_version=os.environ["AZURE_OPENAI_API_VERSION"],
+    openai_api_version=os.environ["AZURE_OPENAI_API_VERSION_O3_MINI"],
 )
 vector_store = AzureSearch(
     azure_search_endpoint=os.environ["AZURE_AI_SEARCH_ENDPOINT"],
@@ -204,7 +199,7 @@ retriever = vector_store.as_retriever(
     }
 )
 
-@tool
+@tool(return_direct=True)
 def execute_sql_and_get_results(query: str) -> str | List[any]:
     """
     Executes a SQL query against the database and returns the results,
@@ -239,7 +234,7 @@ def ask_database_expert(question: str) -> str:
 # 1c) LangChain SQL toolkit
 try:
     sql_db = SQLDatabase(engine)
-    sql_toolkit = SQLDatabaseToolkit(db=sql_db, llm=openai_agent_llm)
+    sql_toolkit = SQLDatabaseToolkit(db=sql_db, llm=openai_GPT4_llm)
     print("SQL Database Toolkit initialized.")
 except Exception as e:
     print(f"Error initializing SQLDatabase or Toolkit: {e}")
@@ -250,110 +245,56 @@ def safe_import(name, globals=None, locals=None, fromlist=(), level=0):
     """
     A custom import function that only allows imports from a predefined list.
     """
-    # Define the list of modules the agent is allowed to import
     ALLOWED_IMPORTS = {
-    # 🔢 Core Data Libraries
+    # 🔢 Core Data Manipulation
     'pandas', 'numpy',
 
-    # 📈 Stats, Math & Aggregation
-    'statistics', 'math', 'scipy',
+    # 📈 Statistical & Scientific Analysis
+    'statistics', 'math', 'scipy', 'statsmodels', 'scipy.stats', 
 
-    # 📋 Tabular/Pretty Formatting
+    # 🤖 Machine Learning
+    'sklearn', 'sklearn.preprocessing', 'sklearn.model_selection', 'sklearn.cluster',
+    'xgboost', 'xgboost.sklearn', 'lightgbm', 
+
+    # 📊 Time-Series Analysis
+    'prophet', 'darts', 'sktime', 'tsfresh',
+
+    # 📋 Tabular/Pretty Formatting (for future use)
     'tabulate', 'prettytable', 'texttable',
 
     # 📄 Output Formatting & Enhancement
-    'json', 'yaml', 're', 'html', 'csv',
+    'json', 'yaml', 're', 'html', 'csv', 'io', 'base64',
 
     # 🗓️ Date/Time Handling
-    'datetime', 'dateutil',
+    'datetime', 'dateutil', 'time', 'calendar',
 
-    # 🧠 Lightweight NLP & Strings
-    'collections', 'itertools', 'string', 'difflib',
-
-    # 📦 Data Utilities
-    'typing', 'functools', 'operator', 'copy',
-
-    # 🧪 Basic Data Validation
-    'pydantic', 'cerberus',
-
-
-    # 🔐 Safe Eval or AST Parsing
-    'ast', 'io', 'traceback', 'contextlib'
-}
-
-    if name in ALLOWED_IMPORTS:
-        # If the module is on the allowlist, perform the actual import
-        return __import__(name, globals, locals, fromlist, level)
+    # 🧠 Lightweight Utilities
+    'collections', 'itertools', 'string', 'difflib', 'functools', 'operator', 'copy',
     
-    # If the module is not on the list, raise an error
+    # 🔐 Sandboxing & Debugging
+    'ast', 'traceback', 'contextlib',
+
+    # Specific pandas sub-libraries
+    'pandas.tseries.offsets', 'pandas.api.types',
+    }
+    
+    # This block allows imports of submodules from allowed libraries
+    parts = name.split('.')
+    if parts[0] in ALLOWED_IMPORTS and len(parts) > 1:
+        if parts[1] == 'tseries':
+            return __import__(name, globals, locals, fromlist, level)
+        elif parts[1] == 'api':
+            return __import__(name, globals, locals, fromlist, level)
+        elif parts[1] in ALLOWED_IMPORTS:
+            # Catches nested submodules like sklearn.cluster
+            return __import__(name, globals, locals, fromlist, level)
+            
+    if name in ALLOWED_IMPORTS:
+        return __import__(name, globals, locals, fromlist, level)
+            
     raise ImportError(f"Import of module '{name}' is not allowed.")
 
-@tool
-def python_code_interpreter(code: str, df: pd.DataFrame) -> str:
-    """
-    Executes a Python script in a sandboxed environment to perform advanced data analysis.
 
-    **Instructions for the Agent:**
-    1. A pandas DataFrame is already available in a variable named `df`.
-    2. Your script SHOULD use this `df` variable directly for analysis.
-    3. Your script MUST `print()` its final, user-facing result to standard output.
-    
-    **Allowed Imports:**
-    You can import any of the following libraries:
-    - pandas, numpy, statistics, math, scipy, tabulate, prettytable, texttable,
-    - json, yaml, re, html, csv, datetime, dateutil, collections, itertools,
-    - string, difflib, typing, functools, operator, copy, pydantic, cerberus,
-    - ast, io, traceback, contextlib
-    
-    Any attempt to import a library not on this list will fail.
-    """
-    # Redirect stdout to capture the output of the print statement
-    output_buffer = io.StringIO()
-    sys.stdout = output_buffer
-
-    # Create the sandboxed execution environment
-    exec_globals = {
-        "__builtins__": {
-            "__import__": safe_import,
-            "math": __import__('math'),
-            "statistics": __import__('statistics'),
-            "tabulate": __import__('tabulate'),
-            "print": print, "len": len, "sum": sum,
-            "map": map, "filter": filter, "zip": zip, "range": range,
-            "isinstance": isinstance, "str": str, "int": int, "float": float,
-            "list": list, "dict": dict, "set": set, "tuple": tuple,
-            "max": max, "min": min, "round": round, "sorted": sorted,
-            "any": any, "all": all, "abs": abs, "enumerate": enumerate, "bool": bool, "getattr": getattr,
-            "ValueError": ValueError, "TypeError": TypeError, "KeyError": KeyError,
-            "IndexError": IndexError, "Exception": Exception, "SyntaxError": SyntaxError
-        },
-        "pd": pd,
-        "np": np
-    }
-    
-    exec_locals = {"df": df}
-    final_dataframe = None
-
-    try:
-        exec(code, exec_globals, exec_locals)
-        # After execution, find the last created DataFrame in the local scope
-        for var in reversed(exec_locals.values()):
-            if isinstance(var, pd.DataFrame):
-                final_dataframe = var
-                break
-    except Exception as e:
-        sys.stdout = sys.__stdout__
-        raise e
-    finally:
-        sys.stdout = sys.__stdout__
-
-    # Convert the final DataFrame to a list of dictionaries for serialization
-    dataframe_result = final_dataframe.to_dict(orient='records') if final_dataframe is not None else None
-
-    return {
-        "stdout": output_buffer.getvalue(),
-        "dataframe": dataframe_result
-    }
 
 class Plan(BaseModel):
     """A plan to answer the user's question, broken down into a list of steps."""
@@ -383,83 +324,56 @@ def parse_plan(llm_output: str) -> str:
 
 
 
-structured_llm = openai_agent_llm.with_structured_output(Plan)
-# --- Replace your existing planner_prompt with this ---
-def load_schema_from_json(file_path: str = "db_schema.json") -> str:
-    """Reads a JSON schema file and formats it into a readable string for the LLM."""
-    try:
-        with open(file_path, 'r') as f:
-            schema_data = json.load(f)
+structured_llm = openai_GPT4_llm.with_structured_output(Plan)
+
+DB_SCHEMA = "Error: Schema file could not be loaded."
+try:
+    # This block executes only once when the server starts.
+    with open("tourism_schema.json", 'r') as f:
+        schema_data = json.load(f)
+    
+    schema_string = ""
+    # Use .get("tables", []) to safely handle cases where the key might be missing
+    for table in schema_data.get("tables", []):
+        # FIX: Changed table['name'] to table['table_name']
+        schema_string += f"Table Name: `{table['table_name']}`\n"
+        schema_string += f"Description: {table['description']}\n"
+        schema_string += "Columns:\n"
         
-        schema_string = ""
-        for table in schema_data.get("tables", []):
-            schema_string += f"Table Name: `{table['name']}`\n"
-            schema_string += f"Description: {table['description']}\n"
-            schema_string += "Columns:\n"
-            for col in table.get("columns", []):
-                schema_string += f"  - `{col['name']}` ({col['type']}): {col['description']}\n"
-            schema_string += "\n"
-        return schema_string.strip()
-    except FileNotFoundError:
-        return "Error: Schema file not found."
-    except json.JSONDecodeError:
-        return "Error: Could not decode the JSON schema file."
+        for col in table.get("columns", []):
+            schema_string += f"  - `{col['column_name']}` ({col['data_type']}): {col['description']}\n"
+        schema_string += "\n"
+        
+    DB_SCHEMA = schema_string.strip()
+    print("Database schema loaded into memory.")
+except Exception as e:
+    print(f"CRITICAL ERROR: Could not load db_schema.json. Planner will not have context. Error: {e}")
+    # Optional: re-raise the exception to stop the server if the schema is critical
+    # raise
+
+# Replace your existing planner_prompt with this new, more nuanced version.
+
 planner_prompt = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            """You are a world-class Principal Analyst and Strategic Planner. 
-Your primary role is to produce an exhaustive, step-by-step execution plan for a team of junior agents. 
-You **never execute SQL or Python yourself** — you only instruct other agents precisely on what to pull, calculate, or assemble.  
-You must always avoid requesting massive raw data dumps. Instead, focus on **aggregation, filtering, and only the relevant fields**.
+            """You are a world-class Principal Analyst and Strategic Planner. Your sole output is a high-level execution plan for a team of agents to answer a user's business question.
 
-=====================================================
-STAGE 1: DECONSTRUCT & EXPAND THE REQUEST
-=====================================================
-Perform a deep analysis of the user's query. Explicitly identify:
-1. **Core Objective** - What is the fundamental business question?  
-2. **Explicit Requirements** - Which pieces of information or metrics are directly requested?  
-3. **Implicit Needs & Context** - What additional insights (comparisons, trends, root causes) will make the analysis stronger?  
-4. **Define Ambiguity** - Pin down vague terms (e.g., “poor performance,” “success,” “at risk”) with measurable definitions.
-5.**Gain Context** - use this json file to gain context over the entire database Schema and Metadata to gain full context of what the database contains.
+Think Managerially: Focus on what each agent should accomplish, not how. Demand excellence from SQL and Python agents.
 
-----------------------------
-{db_schema}
----------------------------- 
+SQL Steps: Define high-level business questions only. No table/column names or functions.
 
+PYTHON Steps: Specify business logic, calculations, or transformations on retrieved data.
 
-=====================================================
-STAGE 2: FORMULATE A HIGH-LEVEL STRATEGY
-=====================================================
-- Translate the analysis into a clear, high-level strategy for extracting and analyzing data.  
-- IMPORTANT: NEVER request entire tables or unfiltered data dumps.  
--  design SQL instructions around aggregation WHERE APPLICABLE DO NOT AGGREGATE IF IT DOESNT MAKE SENSE TO THE ANSWER (e.g., averages, counts, sums), filtering (e.g., specific date ranges, sectors, or thresholds), or summarization .  
-- If multiple queries are needed, break them down logically.
--
-=====================================================
-STAGE 3: CREATE THE STEP-BY-STEP EXECUTION PLAN
-=====================================================
-Write a precise sequence of instructions for junior agents.  
-Each step MUST begin with one of the following commands:
+SYNTHESIZE Step (Critical): Always end with SYNTHESIZE:. This step must integrate all previous work into a flawless, user-ready answer. Ensure it fully reflects the quality of SQL and Python outputs. Mistakes here diminish the value of your team.
 
-- `SQL:` [Use to instruct which *specific, aggregated, or filtered data* should be retrieved. 
-   DO NOT request raw tables or row-level dumps.  
-   Good Examples:  
-   • "SQL: Retrieve the total allocated budget and total remaining budget per project sector for the last 12 months." 
-   Bad Example (NOT ALLOWED):  
-   • "SQL: Retrieve all projects in the user's sector, including their current progress, target metrics, and deadlines."  
-- `PYTHON:` [Use for calculations, transformations, or filtering. Example: "PYTHON: Compute OverrunPercentage = (BudgetUsed / AllocatedBudget). Filter projects with OverrunPercentage > 15%."]  
-- `SYNTHESIZE:` [Always the final step. Instruct to combine all processed outputs into a clear, coherent answer.]
+Tourism Focus: Only create tasks for tourism KPIs; non-tourism requests go directly to SYNTHESIZE.
 
-Execution Plan Rules:  
-- The plan must be step-by-step, with no ambiguity.  
-- SQL instructions must always be scoped (aggregated, filtered, or limited).  
-- The **very last step must always be**:  
-  `SYNTHESIZE:`  
+Database context: {db_schema}
 
-=====================================================
-END OF INSTRUCTIONS
-=====================================================
+if user input asks for data in arabic , the entire plan should be choreographed to give an answer in arabic, if the user input was in english then the entire answer should be in english
+
+Analyze the user request and produce the execution plan immediately.
 """,
         ),
         ("human", "{input}"),
@@ -467,7 +381,8 @@ END OF INSTRUCTIONS
 )
 
 planner = planner_prompt | structured_llm
-# --- Add this block right after the planner_prompt definition ---
+
+
 
 # --- Now, modify the planner_node function ---
 def planner_node(state: AgentState) -> Dict[str, Any]:
@@ -476,11 +391,10 @@ def planner_node(state: AgentState) -> Dict[str, Any]:
     the user's query, using a high-level schema summary for context.
     """
     print("--- 🧠 Planning... ---")
-    db_schema = load_schema_from_json("db_schema.json")
     # STEP 2: Invoke the planner, now providing BOTH required inputs
     plan_object = planner.invoke({
         "input": state["input"],
-        "db_schema": db_schema
+        "db_schema": DB_SCHEMA 
     })
     
     plan_steps = plan_object.steps
@@ -498,15 +412,16 @@ custom_sql_agent_prompt = ChatPromptTemplate.from_messages(
 
             **Workflow:**
             1.  **Analyze the Request**: Understand what the user is asking for.
-            2.  **Consult the Expert**: Your first step MUST be to use the `ask_database_expert` tool. This will give you vital context about table schemas, column meanings, and business rules. Ask a clear, direct question to this tool.
+            2.  **Consult the Expert**: Your first step MUST be to use the `ask_database_expert` tool. This will give you vital context about table schemas, column meanings, and business rules. THIS TOOL IS FOR CONTEXT AND DATABASE UNDERSTANDING ONLY ,ITS AI SEARCH INDEX WHICH CONTAINS INDEXED JSON ABOUT THE DATABASE CONTENTS 
             3.  **Construct the Query**: Based on the expert's information, write an accurate and efficient MSSQL query.
             4.  **Execute the Query**: Use the `execute_sql_and_get_results` tool to run your query.
             5.  **Return the Result**: The raw output from `execute_sql_and_get_results` will be your final answer. Do not add any conversational text or summaries; the tool's direct output is what's required.
 
                 **Query Quality Requirements:**
             1.  **BE UNIQUE:** If the user asks for a "list of" items (e.g., "list of indicators", "what categories are available?"), you MUST use the `DISTINCT` keyword to avoid returning thousands of duplicate rows. Example: `SELECT DISTINCT MainIndicatorNameEN, IndicatorType FROM ...`
-            2.  **BE PRECISE:** Never use `SELECT *`. Only select the specific columns needed to answer the user's question.
-
+            2.  **EFFICIENT QUERYING**: Always construct your query to filter (NOT BY TOP 10 ) as much as you can to retrieve the smallest dataset restricting your querying to a condition that the retreived data would be used to fully asnwer the user input,THIS IS NOT OPTIONAL U MUST FILTER WHERE APPLICABLE.
+            3.  **BE PRECISE:** Never use `SELECT *`. Only select the specific columns needed to answer the user's question.
+            4.  **Nulls** : never clean the data of missing values , as null values themseleves are informative and should be reported as is. 
             **MANDATES:**
             - **Always Provide Numerical Context**: Never return a number without its unit or format. This is a non-negotiable rule.
             - When querying metrics from `Tourism_Indicator_Details` (e.g., Actual, Target), you **MUST** also `SELECT` the `UnitEN` and `Format` columns.
@@ -518,197 +433,308 @@ custom_sql_agent_prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-# 2b. SQL Agent Node
-# This node will execute the SQL tasks from the plan. It will use the `sql_agent_executor` which we will create later.
-# 2b. SQL Agent Node (Custom Agent Version)
-def sql_agent_node(state: AgentState) -> Dict[str, Any]:
+
+
+async def sql_agent_node(state: AgentState) -> Dict[str, Any]:
     """
-    Executes a SQL task using a custom agent. This node is designed to be highly
-    resilient by robustly extracting the structured data from the agent's output,
-    regardless of whether it's in the intermediate steps, the final output as a
-    list, or the final output as a string.
+    Executes the SQL task with early stopping. If the tool returns an error,
+    it updates the state to trigger a retry loop via the router.
     """
-    print("--- 🛢️ Executing SQL Task with Custom Agent ---")
+    # --- MODIFICATION: Track retry attempts ---
+    print("--- 🛢️ Executing SQL Task (Attempt " + str(state.get('sql_retry_count', 0) + 1) + ") ---")
     current_plan_step = state['plan'][0]
     task_description = current_plan_step.split(": ", 1)[1]
 
-    # Invoke our custom agent
-    result = custom_sql_agent_executor.invoke({"input": task_description})
-    structured_data = []
+    # --- MODIFICATION: Add error context to the prompt on retries ---
+    if state.get("sql_error"):
+        print(f"Retrying with error context: {state['sql_error']}")
+        task_description = (
+            f"Your previous attempt to execute a SQL query for the task below failed. "
+            f"Analyze the error and write a corrected query.\n\n"
+            f"PREVIOUS ERROR: {state['sql_error']}\n\n"
+            f"ORIGINAL TASK: {task_description}"
+        )
 
-    # --- New, Simplified Extraction Logic ---
+    try:
+       
+        agent_response = await custom_sql_agent_executor.ainvoke(
+            {"original_query": state["input"],
+             "full_plan": "\n".join(state["plan"]),
+             "input": task_description},
+        )
+        tool_output = agent_response.get("output")
 
-    # 1. First, check if the output IS the list we need. This is the most common success case.
-    if isinstance(result.get("output"), list):
-        print("SUCCESS: Extracted data directly from 'output' field.")
-        structured_data = result["output"]
-    
-    # 2. If not, check the intermediate_steps, the other potential success case.
-    elif result.get("intermediate_steps"):
-        # Check the last step's observation for a list
-        last_step_obs = result["intermediate_steps"][-1][1]
-        if isinstance(last_step_obs, list):
-            print("SUCCESS: Extracted data from intermediate_steps.")
-            structured_data = last_step_obs
+        # --- MODIFICATION: Handle success and failure cases differently ---
 
-    # 3. If neither of the above, check if the output is a string that needs parsing.
-    elif isinstance(result.get("output"), str):
-        print("INFO: Output is a string. Attempting to parse.")
-        try:
-            output_str = result["output"]
-            match = re.search(r"(\[\[.*\]\])", output_str, re.DOTALL)
-            if match:
-                clean_str = match.group(1)
-                # --- THIS IS THE FIX ---
-                # Replace any database 'null' with Python's 'None' before parsing
-                sanitized_str = clean_str.replace('null', 'None')
-                structured_data = ast.literal_eval(sanitized_str)
-                # --- END OF FIX ---
-                print("SUCCESS: Parsed structured data from string output.")
-            else:
-                 print("WARN: No list-like pattern found in string output.")
-        except (ValueError, SyntaxError) as e:
-            print(f"WARN: Failed to parse string output: {e}")
+        # SUCCESS CASE: The tool returned a list.
+        if isinstance(tool_output, list):
+            print(f"Data extraction successful (Headers + First 2 rows): {tool_output[:3]}")
+            structured_data = tool_output
+            # Create the result object for the state
+            new_sql_result = {"task": task_description, "structured_data": structured_data}
+            # Return a dictionary that advances the plan and clears any errors
+            return {
+                "plan": state['plan'][1:],
+                "sql_results": [new_sql_result],
+                "sql_error": None  # Clear the error on success
+            }
 
-    # --- Final Check & Error Handling ---
-    if structured_data:
-        print(f"Data extraction successful (Headers + First 2 rows): {structured_data[:3]}")
-    else:
-        print(f"CRITICAL ERROR: Could not extract structured data. Final agent output was: {result.get('output')}")
-        structured_data = [["data_extraction_failed"], [f"Output: {result.get('output')}"]]
+        # FAILURE CASE: The tool returned an error string.
+        elif isinstance(tool_output, str):
+            print(f"--- ERROR: SQL tool returned an error message: {tool_output} ---")
+            # Return a dictionary that updates the error state for the router to catch
+            return {
+                "sql_error": tool_output,
+                "sql_retry_count": state.get('sql_retry_count', 0) + 1
+            }
 
-    new_sql_result = {"task": task_description, "structured_data": structured_data}
-    return {"plan": state['plan'][1:], "sql_results": [new_sql_result]}
+        # UNEXPECTED FORMAT CASE: Also treat as a failure to retry.
+        else:
+            print(f"--- WARN: Unexpected agent output format: {agent_response} ---")
+            error_msg = f"Unexpected agent output: {str(agent_response)}"
+            return {"sql_error": error_msg, "sql_retry_count": state.get('sql_retry_count', 0) + 1}
+
+    # EXCEPTION CASE: Also treat as a failure to retry.
+    except Exception as e:
+        print(f"--- ERROR: An exception occurred while invoking the SQL agent: {e} ---")
+        traceback.print_exc()
+        error_msg = f"An unexpected error occurred in the agent node: {e}"
+        return {"sql_error": error_msg, "sql_retry_count": state.get('sql_retry_count', 0) + 1}
+
 
 # 2c. Python Agent Node
 # This node executes the Python analysis tasks.
-python_agent_prompt = PromptTemplate.from_template(
-    """You are an expert Python data analyst. Your ONLY task is to write a Python script that uses a pre-loaded pandas DataFrame named `df`.
+python_agent_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system",
+     """You are an expert Python data engineer. Your sole mission is to write a clean, efficient Python script to process a pandas DataFrame based on the user's goal.
 
-**CRITICAL CONTEXT: The DataFrame (`df`) Schema**
-The DataFrame `df` is already loaded. Here are its first few rows:
+--- CONTEXT ---
+- **User's Goal:** "{task_description}"
+- **DataFrame Preview (`df.head()`):**
 {df_preview}
+- **Available Columns:** {column_names}
 
-
-**RULES:**
-1.  You **MUST ONLY USE** the column names provided above: **{column_names}**.
-2.  Do NOT hallucinate or assume other column names exist.
-3.  Do NOT write code to create the DataFrame; it is already in memory.
-4.  Your script **MUST** `print()` its final, user-facing result to standard output.
-5. NEVER drop columns containing metadata like units ,format ,counts or intervals ,THESE ARE ESSENTIAL to give the user the complete answer 
-
----
-**User's Goal:**
-{original_query}
-
-**Current Task from Plan:**
-"{task_description}"
-
-{error}
-
-**Python Code:**
+--- RULES & REQUIREMENTS ---
+1.  **Function-Only Output:** Your output MUST be ONLY the Python code for a single function `def analyze(df: pd.DataFrame) -> pd.DataFrame:`. Do not add any explanation, conversational text, or example usage.
+2.  **Return, Don't Print:** This function MUST take a pandas DataFrame as its only argument and **return** the final, transformed DataFrame as its output. The final line of your function should be a `return df` statement.
+3.  **Encapsulation:** All your logic (imports, helper functions, etc.) must be contained *inside* the `analyze` function. The only code in the global scope should be the `import` statements at the top.
+4.  **Robust Date Handling:** If the task requires parsing dates from a column like 'IntervalValue', your script MUST correctly handle multiple common formats (e.g., 'YYYY-Q#', 'YYYY-MM', 'YYYY'). Create a new sortable 'IntervalDate' column with the results.
+5.  **Data Precision:** Round all final numeric values to a maximum of two decimal places.
+6.  **Forbidden Libraries:** You MUST NOT import any visualization libraries (e.g., matplotlib, seaborn, plotly) or attempt to generate plots.
+7.**Nulls** : never clean the data of missing values , as null values themseleves are informative and should be reported as is. 
 """
+),
+       ("human", "{input}"),
+        MessagesPlaceholder(variable_name="agent_scratchpad"),
+    ]
 )
 
-def python_agent_node(state: AgentState) -> Dict[str, Any]:
-    print("--- 🐍 Executing Python Analysis ---")
-    current_plan_step = state['plan'][0]
-    task_description = current_plan_step.split(": ", 1)[1]
 
-    # --- DataFrame Creation & Preview Generation ---
+# In main.py, replace the python_agent_node with this version
+
+def python_agent_node(state: AgentState):
+    """
+    Generates and executes Python code to analyze a DataFrame.
+    """
+    print(f"--- 🐍 Executing Python Logic in Node (Attempt {state.get('python_retry_count', 0) + 1}) ---")
+
+    # --- 1. PREPARE DATA & PROMPT INPUTS (Unchanged) ---
+    task_description = state['plan'][0]
+    structured_data = state['sql_results'][-1]['structured_data']
+    failed_code = state.get('python_last_failed_code')
+    error_message = state.get('python_error')
+
     try:
-        # Get the structured data from the previous step
-        structured_data = state['sql_results'][0]['structured_data']
-        if not structured_data or len(structured_data) < 2:
-            raise ValueError("SQL data is empty or missing headers.")
-
-        # Programmatically create the DataFrame
-        headers = structured_data[0]
-        rows = structured_data[1:]
-        df = pd.DataFrame(rows, columns=headers)
-        
-        # Generate a clean string preview of the DataFrame's head
+        df = pd.DataFrame(structured_data[1:], columns=structured_data[0])
         df_preview = df.head().to_string()
         column_names = ", ".join(df.columns)
     except Exception as e:
-        print(f"--- DataFrame Creation Failed ---\n{e}")
-        # If we can't even create the DataFrame, we must return an error
-        return {"python_error": f"Failed to create DataFrame: {e}"}
+        error = f"Failed to create DataFrame from SQL results: {e}"
+        print(f"--- ❌ Python Node Failed --- \n Error Details:\n{error}")
+        return {
+            "python_error": error,
+            "python_retry_count": state.get('python_retry_count', 0) + 1,
+        }
 
-
-    error_message = state.get('python_error')
-    error = f"You previously wrote a script that failed with this error:\n{error_message}\nPlease correct the script." if error_message else ""
-
-    # Generate the Python code with the new, richer context
-    prompt = python_agent_prompt.invoke({
-        "original_query": state["input"],
-        "full_plan": "\n".join(state["plan"]),
-        "task_description": task_description,
-        "notebook_history": "\n".join(state.get("python_notebook", [])),
-        "df_preview": df_preview,
-        "column_names": column_names,
-        "error": error
-    })
-    response = openai_agent_llm.invoke(prompt)
-    raw_code = response.content
-
-    # Extract the code from markdown blocks
-    match = re.search(r"```python\n(.*?)```", raw_code, re.DOTALL)
-    code_to_execute = match.group(1).strip() if match else raw_code.strip()
-    print(f"Cleaned Python Code to Execute:\n{code_to_execute}")
-
-    # Try to execute the code
+    # --- 2. INVOKE THE AGENT TO *GENERATE* THE CODE STRING (Unchanged) ---
     try:
-        # The tool now returns a dictionary
-        tool_result = python_code_interpreter.invoke({
-            "code": code_to_execute,
-            "df": df
+        agent_response = custom_python_agent_executor.invoke({
+            "input": state["input"],
+            "task_description": task_description,
+            "df_preview": df_preview,
+            "column_names": column_names,
+            "failed_code": failed_code if failed_code else "# No previous script failed.",
+            "error": error_message if error_message else "No error on the previous attempt."
         })
+        
+        if isinstance(agent_response, dict) and 'output' in agent_response:
+             python_code_string = agent_response['output']
+        else:
+             python_code_string = str(agent_response)
 
-        analysis_result = tool_result["stdout"]
-        final_data_table = tool_result["dataframe"]
+        python_code_string = re.sub(r'^```python\n|```$', '', python_code_string, flags=re.MULTILINE).strip()
 
-        print(f"Python Analysis Result: {analysis_result}")
-        # On success, clear any previous error and return BOTH the summary and the data
+    except Exception as e:
+        error_details = f"Failed to invoke the code-generation agent: {traceback.format_exc()}"
+        print(f"--- ❌ Python Agent Invocation Failed ---\n{error_details}")
+        return {
+            "python_error": str(e),
+            "python_retry_count": state.get('python_retry_count', 0) + 1,
+        }
+
+    # --- 3. SAFELY EXECUTE THE GENERATED CODE (Corrected Logic) ---
+    df_copy = df.copy()
+
+    exec_globals = {
+    "__builtins__": {
+        # Functions we want to allow from the standard library
+        "__import__": safe_import, 
+        "print": print, 
+        "len": len, 
+        "range": range,
+        "str": str, 
+        "int": int, 
+        "float": float, 
+        "list": list, 
+        "dict": dict, 
+        "set": set,
+        "round": round, 
+        "max": max, 
+        "min": min, 
+        "sum": sum, 
+        "abs": abs,
+        "enumerate": enumerate, # <-- ADDED
+        "zip": zip, # <-- ADDED
+        "isinstance": isinstance, # <-- ADDED
+        # Error types to catch
+        "Exception": Exception, "ValueError": ValueError, "TypeError": TypeError,
+        "NameError": NameError, "AttributeError": AttributeError, "KeyError": KeyError,
+    },
+    # Modules to make directly available
+    "pd": pd, 
+    "np": np, 
+    "re": re, 
+    "statistics": statistics, 
+    "collections": collections,
+}
+
+    exec_locals = {}
+    try:
+        print(f"--- Attempting to execute generated code ---\n{python_code_string}\n-----------------------------------------")
+        
+        exec(python_code_string, exec_globals, exec_locals)
+
+        analyze_func = exec_locals.get('analyze')
+        if not callable(analyze_func):
+            raise ValueError("The generated Python code did not define a callable function named 'analyze'.")
+
+        final_dataframe = analyze_func(df_copy)
+
+        if not isinstance(final_dataframe, pd.DataFrame):
+            raise ValueError("The 'analyze' function did not return a valid pandas DataFrame.")
+
+        print("--- ✅ Python Script Executed Successfully ---")
+        
+        output_summary = f"The Python script executed successfully. Here is a preview of the resulting data:\n{final_dataframe.head().to_string()}"
+        print("--- 📊 Final DataFrame Head ---")
+        print(final_dataframe.head().to_string())
+        print("---------------------------------")
+        
+        dataframe_result = final_dataframe.to_dict(orient='records')
         return {
             "plan": state['plan'][1:],
-            "python_notebook": [analysis_result],
-            "analysis_summary": analysis_result,
-            "final_data": final_data_table,  # <-- SAVE THE DATA
-            "python_error": None
+            "analysis_summary": output_summary,
+            "final_data": dataframe_result,
+            "python_error": None,
+            "python_retry_count": 0,
+            "python_last_failed_code": None
         }
-    except Exception as e:
-        print(f"--- Python Execution Failed ---\n{e}")
-        # On failure, return the error so the agent can retry
-        return {"python_error": str(e)}
+
+    except Exception:
+        error_details = traceback.format_exc()
+        print(f"--- ❌ Python Script Failed ---\nError Details:\n{error_details}")
+        return {
+            "python_error": error_details,
+            "python_retry_count": state.get('python_retry_count', 0) + 1,
+            "python_last_failed_code": python_code_string
+        }
+
 
 synthesizer_prompt = PromptTemplate.from_template(
-"""You are an expert data analyst writing a final report. Your goal is to provide a clear, insightful summary backed by the specific data that was found.
+"""You are a senior data analyst and insights communicator. Your primary goal is to provide a clear, direct, and appropriately formatted answer to the user's question based on the final data provided.
 
-**1. Start with the User's Original Question:**
-{input}
+First, determine the user's intent: are they asking for a simple fact/list, or do they require analysis/comparison? Then, format your response according to the rules below.
 
-**2. Review the Python Analysis Summary:** This is a high-level text summary of the findings.
-{analysis_summary}
+**--- CONTEXT ---**
+- **User's Original Question:** {input}
+- **Final Data Analysis Summary:** {analysis_summary}
+- **Supporting Data Table:** {data_table}
 
+**--- UNIVERSAL RULES (APPLY TO ALL RESPONSES) ---**
+1.  **EMPTY DATA RULE (Priority 1):** If the `Supporting Data Table` is empty or contains no meaningful results, you **MUST NOT** invent an answer or interpret the absence of data as zeros. Do not show an empty data table. Instead, respond contextually and directly. For example: "Based on the available data, there were no records found for [topic of the user's question]."
+2.  **SCOPE GUARDRAIL (Priority 2):** If the data is NOT empty but the user's question is clearly not about tourism, respond ONLY with: `I can only answer questions related to tourism indicators.`
+3.  **Supporting Data(priority 3):** :When creating a summary table for your final report, you MUST include the columns that are most critical for understanding the conclusion.
+4. **GREETING** : IF the user input is a simple greeting then just greet him back "Hello! How can I assist you today with your tourism data inquiries?"
+5. **Null Data Handling (Priority 4):** If the data contains NULL or missing values, acknowledge this and mention explicitly that data on this or that is missing , analyze logically and report why would this data be missing. 
+---
+**--- RESPONSE FORMATTING ---**
+*Select ONE of the following formats based on the user's question.*
 
-**3. Review the Supporting Data Table:** This is the raw data that backs up the summary.
-{data_table}
+**FORMAT 1: For Direct Questions (Facts, Lists, Counts)**
+*Use this format if the user asks "What is...", "List all...", "How many...", or for a simple data retrieval.*
 
+-   Start with a brief, direct introductory sentence.
+-   Present the data clearly using a bulleted list or a markdown table.
+-   Do not write a formal report with sections like "Executive Summary" or "Conclusion." Keep it concise and to the point.
 
-**4. Your Task: Generate the Final Report**
-- First, write a concise, clear summary of the findings in prose.
-- Then, present the key data from the "Supporting Data Table" in a clean format (like a markdown table) to act as evidence for your summary.
-- Ensure the report is well-structured and directly answers the user's original question.
+**FORMAT 2: For Analytical Questions (Analysis, Trends, Comparisons)**
+*Use this format if the user asks for an "analysis," "comparison," "summary," "trend," or a "why/how" question.*
 
-**Final Report:**
+-   You **MUST** follow this professional report structure precisely using Markdown.
+-   Analyze the data fully to generate your own insightful conclusions.
+
+# Report: [A concise, descriptive title based on the user's question]
+
+## Executive Summary
+A brief, one-paragraph summary of the most critical findings and your main conclusion. This should be easily digestible for a busy executive.
+
+## Key Findings
+- A bulleted list of the most important facts, trends, or figures you discovered in the data.
+- Each point must be a complete, insightful sentence.
+
+## Detailed Analysis
+A narrative explanation of the data. Discuss the trends, patterns, or comparisons that support your key findings. This is where you elaborate on the "why" behind the numbers and provide a deeper interpretation of what the data means.
+
+## Supporting Data
+The final data table you received, presented in a clean markdown format.
+
+## Conclusion
+A final paragraph that summarizes the analysis and provides a concluding thought or implication that directly relates to the user's original question.
+
+---
+**Begin your response now, selecting the appropriate format based on the user's question.**
 """
 )
+
+
 def synthesizer_node(state: AgentState) -> Dict[str, Any]:
     """
     The final node in the workflow. It synthesizes a report from either the
     Python analysis output or, if that's not present, the direct SQL results.
     """
+    MAX_SQL_RETRIES = 10 # This value must match the one in the router
+
+    if state.get("sql_error") and state.get("sql_retry_count", 0) >= MAX_SQL_RETRIES:
+        print("--- ✍️ Synthesizing Final Report (SQL Failure) ---")
+        error_report = "I'm sorry, but I was unable to retrieve the necessary data from the database after several attempts. This could be due to an issue with the query or the database itself. Please try rephrasing your question."
+        return {"final_report": error_report}
+
+    if state.get("python_error"):
+        print("--- ✍️ Synthesizing Final Report (Python Failure) ---")
+        error_report = "I'm sorry, but I encountered an issue while analyzing the data. The data might have been in an unexpected format. Please try rephrasing your question."
+        return {"final_report": error_report}
+    
     print("--- ✍️ Synthesizing Final Report ---")
 
     # Safely get the analysis summary. Provide a default if the python_agent was skipped.
@@ -741,12 +767,13 @@ def synthesizer_node(state: AgentState) -> Dict[str, Any]:
 
     prompt = synthesizer_prompt.invoke({
         "input": state["input"],
+        "full_plan": "\n".join(state.get("plan", [])),
         "analysis_summary": analysis_summary, # This is now safe
         "data_table": data_table_str
     })
 
     # Use the streaming LLM for the final output
-    response = openai_refiner_llm.invoke(prompt)
+    response = openai_GPT4_llm.invoke(prompt)
 
     print(f"Final Report: {response.content}")
     return {"final_report": response.content}
@@ -754,13 +781,29 @@ def synthesizer_node(state: AgentState) -> Dict[str, Any]:
 def router(state: AgentState) -> str:
     print("--- 🚦 Routing... ---")
     
-    # NEW: First, check for a Python error. If so, loop back to the python agent.
-    if state.get("python_error"):
-        print("Python error detected, returning to Python agent for retry.")
-        return "python_agent"
+    MAX_RETRIES = 10
 
-    # If there's no error, continue with the plan
-    if not state['plan']:
+    # 1. Check for a SQL error. If it exists, either retry or route to the synthesizer on failure.
+    if state.get("sql_error"):
+        if state.get("sql_retry_count", 0) < MAX_RETRIES:
+            print(f"SQL error detected. Routing back to SQL agent for retry.")
+            return "sql_agent"
+        else:
+            print(f"Max SQL retries ({MAX_RETRIES}) reached. Routing to synthesizer for error report.")
+            return "synthesizer"
+
+    if state.get("python_error"):
+        if state.get("python_retry_count", 0) < MAX_RETRIES:
+            print(f"Python error detected. Routing back to Python agent for retry.")
+            # We need to increment the retry count in the state before returning
+            # NOTE: The python_agent_node must be updated to handle this
+            return "python_agent" 
+        else:
+            print(f"Max Python retries ({MAX_RETRIES}) reached. Routing to synthesizer for error report.")
+            return "synthesizer"
+
+    # 3. If no errors, follow the execution plan.
+    if not state.get('plan'):
         print("Plan complete. END.")
         return END
         
@@ -770,7 +813,6 @@ def router(state: AgentState) -> str:
         print("Next Step: SQL")
         return "sql_agent"
     elif next_step.startswith("PYTHON:"):
-        # The router will now correctly handle looping through multiple Python steps
         print("Next Step: PYTHON")
         return "python_agent"
     elif next_step.startswith("SYNTHESIZE:"):
@@ -780,19 +822,33 @@ def router(state: AgentState) -> str:
         print("Unrecognized step. END.")
         return END
     
-agent = create_openai_tools_agent(
-    llm=openai_agent_llm,
+sql_agent = create_openai_tools_agent(
+    llm=openai_GPT4_llm,
     tools=custom_sql_tools,
     prompt=custom_sql_agent_prompt
 )
 
 # 4. Create the Agent Executor, which is what we will invoke
 custom_sql_agent_executor = AgentExecutor(
-    agent=agent,
+    agent=sql_agent,
     tools=custom_sql_tools,
-    verbose=True
+    verbose=True,
 )
 print("Custom SQL Agent Executor created with smart tool.")
+
+python_agent = create_openai_tools_agent(
+    llm=openai_GPT4_llm, # Using the stronger model for code generation
+    tools=[],
+    prompt=python_agent_prompt
+)
+
+custom_python_agent_executor = AgentExecutor(
+    agent=python_agent,
+    tools=[],
+    verbose=True
+)
+print("Custom Python Agent Executor created.")
+
 
 # Now, let's build the graph by wiring together our nodes and router
 workflow = StateGraph(AgentState)
@@ -862,12 +918,25 @@ async def ask_sql_endpoint(request: QueryRequest):
                     initial_state = {"input": query, "sql_results": []}
                     
                     # Stream the state updates from our new graph
+                     # Stream the state updates from our new graph
                     async for chunk in app_graph.astream(initial_state, stream_mode="values"):
                         last_state = chunk
                         
-                        # Send high-level status updates to the sse_queue
+                        # --- MODIFICATION: Send user-friendly status updates ---
+                        user_friendly_message = ""
                         if "plan" in last_state and last_state["plan"]:
-                            await sse_queue.put(await send_event("status", {"message": f"Executing: {last_state['plan'][0]}"}))
+                            current_step = last_state['plan'][0]
+                            if current_step.startswith("SQL:"):
+                                user_friendly_message = "Gathering the necessary data..."
+                            elif current_step.startswith("PYTHON:"):
+                                user_friendly_message = "Analyzing and calculating results..."
+                            elif current_step.startswith("SYNTHESIZE:"):
+                                user_friendly_message = "Preparing your final answer..."
+                            
+                            # Only send a message if we have a new one
+                            if user_friendly_message:
+                                await sse_queue.put(await send_event("status", {"message": user_friendly_message}))
+
                         elif "final_report" in last_state and last_state["final_report"]:
                              await sse_queue.put(await send_event("status", {"message": "Finalizing report..."}))
                 
@@ -879,9 +948,14 @@ async def ask_sql_endpoint(request: QueryRequest):
                     await sse_queue.put(await send_event("error", {"message": "Could not find a final report in the agent's response."}))
 
             except Exception as e:
-                error_message = f"An error occurred: {str(e)}"
+                # Log the full, detailed error to the server console for debugging
+                print("--- CRITICAL ERROR in agent_runner ---")
                 traceback.print_exc()
-                await sse_queue.put(await send_event("error", {"message": error_message}))
+                
+                # Create and send a generic, user-friendly error message to the frontend
+                user_friendly_error = "I'm sorry, but an unexpected problem occurred while processing your request. Please try rephrasing your question"
+                await sse_queue.put(await send_event("error", {"message": user_friendly_error}))
+
             finally:
                 # Tell both queues we are done
                 await log_queue.put(None)
