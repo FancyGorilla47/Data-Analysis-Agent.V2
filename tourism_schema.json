@@ -47,7 +47,7 @@
     {
       "column_name": "UnitEN",
       "data_type": "string",
-      "description": "The English unit of measurement for the 'Actual', 'Target', 'TargetValue', and 'BaseLineValue' columns (e.g., 'bn QAR', '%', 'Million'). This unit should always be displayed with any numerical value from the row."
+      "description": "The English unit of measurement for the 'Actual', 'operational Target', 'strategic Target', and 'BaseLineValue' columns (e.g., 'bn QAR', '%', 'Million'). This unit should always be displayed with any numerical value from the row."
     },
     {
       "column_name": "UnitAR",

@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 import asyncio
 import builtins
 import traceback
+import datetime
+from typing import Literal
 from contextlib import redirect_stdout
 from contextlib import contextmanager
 from fastapi.staticfiles import StaticFiles
@@ -24,6 +26,7 @@ from typing import TypedDict, Annotated, List, Dict, Any
 from langgraph.graph import StateGraph, END
 from langchain_core.prompts import PromptTemplate
 import operator
+from langchain_core.output_parsers import StrOutputParser
 from typing import List
 import io
 import sys
@@ -107,6 +110,8 @@ class AgentState(TypedDict):
     # where the first inner list is the headers.
     sql_results: Annotated[List[Dict[str, Any]], operator.add]
     analysis_summary: str
+    report_type: str | None
+    enhanced_input: str | None
     python_last_failed_code: str | None 
     python_notebook: Annotated[List[str], operator.add]
     python_retry_count: int
@@ -279,7 +284,7 @@ def safe_import(name, globals=None, locals=None, fromlist=(), level=0):
     'prophet', 'darts', 'sktime', 'tsfresh',
 
     # 📋 Tabular/Pretty Formatting (for future use)
-    'tabulate', 'prettytable', 'texttable',
+    'tabulate', 'prettytable', 'texttable','typing'
 
     # 📄 Output Formatting & Enhancement
     'json', 'yaml', 're', 'html', 'csv', 'io', 'base64',
@@ -320,6 +325,9 @@ class Plan(BaseModel):
     steps: List[str] = Field(
         description="A list of sequential steps to accomplish the user's goal. Each step must start with 'SQL:', 'PYTHON:', or 'SYNTHESIZE:'."
     )
+    report_type: Literal["direct_answer", "full_report"] = Field(
+        description="The type of report to generate. Use 'direct_answer' for simple requests (what, list, how many). Use 'full_report' for analytical requests (analysis, trends, comparisons)."
+    )
 def parse_plan(llm_output: str) -> str:
     """
     Parses the LLM output to extract only the plan steps, removing any preamble.
@@ -341,7 +349,48 @@ def parse_plan(llm_output: str) -> str:
         
     return "\n".join(plan_lines)
 
+prompt_enhancer_template = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            """You are a prompt optimization expert. Your task is to refine a user's raw query into a detailed, unambiguous prompt for a data analysis system.
+            
+            **Context:**
+            - The analysis system has access to a database about Qatar's tourism sector.
+            
+            **Refinement Checklist:**
+            1.  **Clarify Timeframes:** Convert relative dates into absolute dates.
+            2.  **Clarify Ambiguity:** If a term is vague (e.g., "visitors"), mention the specific metric available (e.g., "Number of International Visitors").
+            3.  **Preserve Intent:** Do not change the user's question. Only reformulate to adhere by prompt enigneering best practices , as your reformulation will be passed on to agents.
 
+            **CRITICAL RULE:** You **MUST NOT** invent new analytical requirements or dimensions. For example, if the user asks for "visitor numbers," do NOT add "broken down by nationality" unless they specifically asked for it. Your job is to clarify, not to expand the scope of the question.
+            
+            Produce ONLY the refined prompt as a single string, with no preamble or explanation.
+            """,
+        ),
+        ("human", "Here is the raw query: {input}"),
+    ]
+)
+
+def prompt_enhancer_node(state: AgentState) -> Dict[str, Any]:
+    """
+    Analyzes and refines the user's initial input into a more detailed prompt.
+    """
+    print("--- 🔬 Enhancing User Prompt... ---")
+    user_input = state["input"]
+    
+    # Using your existing GPT-4 model for this task
+    enhancer_chain = prompt_enhancer_template | openai_GPT4_llm | StrOutputParser()
+    
+    enhanced_prompt = enhancer_chain.invoke({
+        "input": user_input,
+        "current_date": datetime.datetime.now().strftime("%Y-%m-%d")
+    })
+    
+    print(f"Original Prompt: {user_input}")
+    print(f"Enhanced Prompt: {enhanced_prompt}")
+    
+    return {"enhanced_input": enhanced_prompt}
 
 structured_llm = openai_GPT4_llm.with_structured_output(Plan)
 
@@ -378,12 +427,24 @@ planner_prompt = ChatPromptTemplate.from_messages(
             "system",
             """You are a world-class Principal Analyst and Strategic Planner. Your sole output is a high-level execution plan for a team of agents to answer a user's business question.
                 Think Managerially: Focus on what each agent should accomplish, not how. Demand excellence from SQL and Python agents.
+
+         **Your First Responsibility:**
+            Analyze the user's request to determine the required report format.
+            - Choose 'direct_answer' for simple, fact-based questions (e.g., "what is...", "list all...", "how many...").
+            - Choose 'full_report' for analytical questions that require interpretation (e.g., "analysis of...", "compare...", "what are the trends...").
+
         **CRITICAL RULES:**
             1.   **One Goal Per Agent:** The entire plan must have a **maximum of one** `SQL:` goal, one `PYTHON:` goal, and one `SYNTHESIZE:` goal.
-            2.  **Strictly Adhere to User Intent:** Your primary duty is to create a plan that answers the user's **exact question**. Do not infer a different goal or add assumptions.NEVER ASK FOR LATEST INTERVAL IF THE USER DID NOT ASK FOR IT.
+            2.   **LITERAL INTERPRETATION (NO ASSUMPTIONS):** Your primary duty is to create a plan that answers the user's **exact, literal question**.
+                 - **DO NOT ADD CONTEXT:** If the user asks for "sector contribution to GDP," your plan is to get exactly that. **You MUST NOT infer they want the "latest" or "most recent" value unless they explicitly use those words.**
+                 - **IF NO TIME IS SPECIFIED, GET ALL TIME:** If a user does not specify a date, year, or time-based filter (like "latest" or "in 2023"), the plan **MUST** be to retrieve all available data for that metric across all time periods.
+                 - **Example:**
+                     - User: "What is the sector contribution to GDP?"
+                     - **BAD PLAN:** "SQL: Retrieve the *most recent* sector contribution to GDP."
+                     - **GOOD PLAN:** "SQL: Retrieve all records for sector contribution to GDP."
             3.   **High-Level Goals Only:** Each step must be a high-level objective. Define *what* to achieve, not *how* to do it. The specialist agents will determine the specific implementation.
-            4.   **SQL Steps: Define high-level business questions only. No table/column names or functions.
-            5.   **PYTHON Steps: Specify business logic, calculations, or transformations on retrieved data.
+            4.   **SQL Steps: Define high-level business questions only. No table/column names or functions, ONLY FORCE THE SQL AGENT TO EXTRACT UNITS AND FORMATS WHENEVER NUMERICAL VALUES ARE NEEDED TO ANSWER THE QUESTION.** 
+            5.   **PYTHON Steps: Specify business logic, calculations, or transformations on retrieved data, even for simple tasks , you should pass a python steps so he sorts it and format it correctly.
             6.   **SYNTHESIZE Step (Critical): Always end with SYNTHESIZE:. This step must integrate all previous work into a flawless, user-ready answer. Ensure it fully reflects the quality of SQL and Python outputs. Mistakes here diminish the value of your team.
             7.   **Tourism Focus: Only create tasks for tourism KPIs;  for database context to understand if the question can be answered by the data available : {db_schema} non-tourism requests go directly to SYNTHESIZE. 
             8.   **if user input asks for data in arabic , the entire plan should be choreographed to give an answer in arabic, if the user input was in english then the entire answer should be in english
@@ -408,15 +469,17 @@ def planner_node(state: AgentState) -> Dict[str, Any]:
     """
     print("--- 🧠 Planning... ---")
     # STEP 2: Invoke the planner, now providing BOTH required inputs
+    prompt_to_plan = state.get("enhanced_input") or state["input"] 
     plan_object = planner.invoke({
-        "input": state["input"],
+        "input": prompt_to_plan,
         "db_schema": DB_SCHEMA 
     })
     
     plan_steps = plan_object.steps
-    
+    report_type = plan_object.report_type
     print(f"Generated Plan: {plan_steps}")
-    return {"plan": plan_steps}
+    print(f"Determined Report Type: {report_type}")
+    return {"plan": plan_steps, "report_type": report_type}
 
 # --- Add this new prompt definition ---
 custom_sql_tools = [ask_database_expert, explore_database_schema, execute_sql_and_get_results]
@@ -445,11 +508,15 @@ custom_sql_agent_prompt = ChatPromptTemplate.from_messages(
             - `execute_sql_and_get_results`: Use LAST for final data extraction. This action is final.
 
             **--- Query Quality Requirements & Mandates ---**
-            1.  **BE UNIQUE:** If the user asks for a "list of" items (e.g., "list of indicators", "what categories are available?"), you MUST use the `DISTINCT` keyword to avoid returning thousands of duplicate rows. Example: `SELECT DISTINCT MainIndicatorNameEN, IndicatorType FROM ...`
-            2.  **BE PRECISE:** Never use `SELECT *`. Only select the specific columns needed to answer the user's question.
+            1.  **TIME AWARENESS (CRITICAL):** NEVER use MAX() on date columns , ALWAYS retrieve historical data , only filter by a specific date when the user explicitly requests it. 
+            2.  **PROVIDE CONTEXT (CRITICAL):** To ensure downstream agents understand the data, you **MUST** always include the primary identifying column(s) in your `SELECT` statement.
+                -   **THIS IS NON NEGOTIABLE**For the `Tourism_Indicator_Details` table, the key identifier is `MainIndicatorNameEN`, and when you select numerical values **ALWAYS INCLUDE** "UnitEN" and "Format" to give meaning to the values.
+                -   **THIS IS NON NEGOTIABLE**For the `Tourism_Program_Details` table, the key identifiers are `ProgramNameEN` and `ProjectNameEN`.
+                -   When selecting numerical metrics, you must also include their corresponding unit and format columns (e.g., `UnitEN`, `Format`).
+                -   When you include "strategictarget" in your query , always include the "targetyear" column to provide temporal context, NEVER user targetyear in any other case than when you include strategictarget, Especially when filtering for the latest or most recent values.
+                -   When you include "operationaltarget" or "actual" in your query , always include the "intervalvalue" column to provide temporal context.  
             3.  **Nulls**: Never clean the data of missing values, as null values themselves are informative and should be reported as is.
-            4.  **Always Provide Numerical Context**: Never return a number without its unit or format. This is a non-negotiable rule. When querying metrics from `Tourism_Indicator_Details` (e.g., Actual, Target), you **MUST** also `SELECT` the `UnitEN` and `Format` columns.
-            5. **FILTERING RULLE** : NEVER USE 
+            4. **FILTER INTELLIGENTLY**: dont pull columns that arent needed to answer the question, be smart about it.
             """,
         ),
         ("human", "{input}"),
@@ -484,7 +551,8 @@ async def sql_agent_node(state: AgentState) -> Dict[str, Any]:
         agent_response = await custom_sql_agent_executor.ainvoke(
             {"original_query": state["input"],
              "full_plan": "\n".join(state["plan"]),
-             "input": task_description},
+             "input": task_description,
+             "current_date": datetime.date.today().isoformat()}
         )
         tool_output = agent_response.get("output")
 
@@ -540,16 +608,46 @@ python_agent_prompt = ChatPromptTemplate.from_messages(
 - **Available Columns:** {column_names}
 
 --- RULES & REQUIREMENTS ---
-1.  **Data Precision & Final Formatting:** 
-            * First, round its numeric values to a **maximum of two decimal places**. Numbers with fewer than two decimal places (like `6.0` or `4.9`) must remain unchanged.
-            * Second, create a new `ActualFormatted` column. This column must be a **string** that combines the correctly rounded number with its `UnitEN` from the data (e.g., "4.90%", "6.0 k", "12.5 bn QAR").
+1.  **Data Precision & Formatting Logic:** Your script must reformat values based on their uniten and format columns. This is the most critical step. Do NOT simply concatenate strings. You must apply the following precise, rule-based logic:
+
+    **Step A: Numerical Rounding**
+    - Before formatting, ensure all key numeric columns (`Actual`, `OperationalTarget`, etc.) are rounded to a maximum of two decimal places. Preserve integers (e.g., `61.0` should become `61`).
+
+    **Step B: Intelligent String Formatting for `ActualFormatted`**
+    - The logic for creating the `ActualFormatted` string depends on the content of the `Format` column. You must analyze it for each row.
+
+    - **Rule 1: If `Format` contains letters (e.g., 'm', 'k').**
+        - In this case, the `Format` column dictates the entire format.
+        - The number should be formatted to match the decimal places shown in the `Format` string.
+        - The letters from the `Format` string should be used as the suffix.
+        - **IGNORE** the `UnitEN` column for this rule.
+        - **Example:**
+            - `Actual` = 0.0876, `Format` = '0.0m'
+            - Rounded `Actual` is 0.09.
+            - `Format` '0.0m' implies one decimal place and the letter 'm'.
+            - **Correct `ActualFormatted` Output:** `'0.1m'`
+
+    - **Rule 2: If `Format` is purely a number (e.g., '0', '0.0').**
+        - In this case, the `Format` column only controls the number of decimal places for the rounded `Actual` value.
+        - The `UnitEN` column provides the suffix.
+        - **Example 1:**
+            - `Actual` = 11.899, `Format` = '0', `UnitEN` = 'bn QAR'
+            - Rounded `Actual` is 11.9.
+            - **Correct `ActualFormatted` Output:** `'11.9 bn QAR'`
+        - **Example 2:**
+            - `Actual` = 61.0, `Format` = '0', `UnitEN` = '%'
+            - Rounded `Actual` is 61.
+            - **Correct `ActualFormatted` Output:** `'61%'`
+
+    - **Summary of Logic:** For each row, check `Format`. If it has letters, use it to format the number. If it only has digits, use `UnitEN` as the suffix.
 2.  **Function-Only Output:** Your output MUST be ONLY the Python code for a single function `def analyze(df: pd.DataFrame) -> pd.DataFrame:`. Do not add any explanation, conversational text, or example usage.
 3.  **Return, Don't Print:** This function MUST take a pandas DataFrame as its only argument and **return** the final, transformed DataFrame as its output. The final line of your function should be a `return df` statement.
 4.  **Encapsulation:** All your logic (imports, helper functions, etc.) must be contained *inside* the `analyze` function. The only code in the global scope should be the `import` statements at the top.
 5.  **Robust Date Handling:** If the task requires parsing dates from a column like 'IntervalValue', your script MUST correctly handle multiple common formats (e.g., 'YYYY-Q#', 'YYYY-MM', 'YYYY'). Create a new sortable 'IntervalDate' column with the results.
 6.  **Data Precision:** Round all final numeric values to a maximum of two decimal places.
 7.  **Forbidden Libraries:** You MUST NOT import any visualization libraries (e.g., matplotlib, seaborn, plotly) or attempt to generate plots.
-8.   **Nulls** : never clean the data of missing values , as null values themseleves are informative and should be reported as is. 
+8.   **Nulls** : never clean the data of missing values , as null values themseleves are informative and should be reported as is.
+9.   **Units & Formats** : Always include the unit and format columns when selecting numerical metrics to provide context.
 """
 ),
        ("human", "{input}"),
@@ -691,57 +789,54 @@ def python_agent_node(state: AgentState):
 synthesizer_prompt = PromptTemplate.from_template(
 """You are a senior data analyst and insights communicator. Your primary goal is to provide a clear, direct, and appropriately formatted answer to the user's question based on the final data provided.
 
-First, determine the user's intent: are they asking for a simple fact/list, or do they require analysis/comparison? Then, format your response according to the rules below.
+You have been instructed to generate a '{report_type}' style response. You MUST follow the formatting rules for that type precisely and adhere to all universal rules.
 
 **--- CONTEXT ---**
 - **User's Original Question:** {input}
 - **Final Data Analysis Summary:** {analysis_summary}
 - **Supporting Data Table:** {data_table}
-- we are in 2025 right now , so if any data is showing years later then that understand exactly why and dnt report it blindly 
+- **Current Year Context:** We are in 2025. Be mindful of this when interpreting data from future years (which may represent targets or forecasts).
+
 **--- UNIVERSAL RULES (APPLY TO ALL RESPONSES) ---**
-1.  **EMPTY DATA RULE (Priority 1):** If the `Supporting Data Table` is empty or contains no meaningful results, you **MUST NOT** invent an answer or interpret the absence of data as zeros. Do not show an empty data table. Instead, respond contextually and directly. For example: "Based on the available data, there were no records found for [topic of the user's question]."
+1.  **EMPTY DATA RULE (Priority 1):** If the `Supporting Data Table` is empty or contains no meaningful results, you **MUST NOT** invent an answer. Do not show an empty data table. Instead, respond contextually: "Based on the available data, there were no records found for [topic of the user's question]."
 2.  **SCOPE GUARDRAIL (Priority 2):** If the user's question is clearly not about tourism, respond ONLY with: `I can only answer questions related to Qatar's tourism sector.`
-3.  **Supporting Data(priority 3):** :When creating a summary table for your final report, you MUST include the columns that are most critical for understanding the conclusion.
-4. **GREETING** : IF the user input is a simple greeting then just greet him back "Hello! I'm here to help with any questions about Qatar's tourism sectors."
-5. **Null Data Handling (Priority 4):** If the data contains NULL or missing values, acknowledge this and mention them in your summary ommitting no detail , but do not include them in the supporting data table unless specifically relevant to the user's question.
-6. **Decimals**: do not omit decimal places , we are dealing with big numbers and every decimal matters , you will recieve data that are already rounded , use them as is 
+3.  **SUPPORTING DATA (Priority 3):** When creating a summary table for your final report, you MUST include the columns that are most critical for understanding the conclusion.
+4.  **GREETING (Priority 4):** If the user input is a simple greeting, greet them back with: "Hello! I'm here to help with any questions about Qatar's tourism sectors."
+5.  **NULL DATA HANDLING (Priority 5):** If the data contains NULL or missing values, acknowledge this in your summary. Do not omit this detail, but do not include them in the supporting data table unless specifically relevant.
+6.  **DECIMALS (Priority 6):** Do not omit decimal places. The data you receive is already rounded correctly; use the values as-is.
+7.  **LANGUAGE:** If the user's question is in Arabic, respond in Arabic. If it's in English, respond in English.
 ---
 **--- RESPONSE FORMATTING ---**
-*Select ONE of the following formats based on the user's question.*
+*Select the format below that matches the instructed '{report_type}'.*
 
-**FORMAT 1: For Direct Questions (Facts, Lists, Counts)**
-*Use this format if the user asks "What is...", "List all...", "How many...", or for a simple data retrieval.*
-
+**FORMAT 1: Use this if report_type is 'direct_answer'**
+*Use for facts, lists, or counts.*
 -   Start with a brief, direct introductory sentence.
 -   Present the data clearly using a bulleted list or a markdown table.
--   Do not write a formal report just add a small summary of the findings if there is any, if a table and introductory sentence is enough then just provide that.
+-   Do not write a formal report. Add a small summary of findings only if there is one; otherwise, the table and introduction are sufficient.
 
-**FORMAT 2: For Analytical Questions (Analysis, Trends, Comparisons)**
-*Use this format if the user asks for an "analysis," "comparison," "summary," "trend," or a "why/how" question.*
-
+**FORMAT 2: Use this if report_type is 'full_report'**
+*Use for analysis, trends, or comparisons.*
 -   You **MUST** follow this professional report structure precisely using Markdown.
 -   Analyze the data fully to generate your own insightful conclusions.
 
 # Report: [A concise, descriptive title based on the user's question]
 
 ## Executive Summary
-A brief, one-paragraph summary of the most critical findings and your main conclusion. This should be easily digestible for a busy executive.
+A brief, one-paragraph summary of the most critical findings and your main conclusion.
 
 ## Key Findings
-- A bulleted list of the most important facts, trends, or figures you discovered in the data.
+- A bulleted list of the most important facts, trends, or figures you discovered.
 - Each point must be a complete, insightful sentence.
 
 ## Detailed Analysis
-A narrative explanation of the data. Discuss the trends, patterns, or comparisons that support your key findings. This is where you elaborate on the "why" behind the numbers and provide a deeper interpretation of what the data means.
+A narrative explanation of the data. Discuss the trends, patterns, or comparisons that support your key findings.
 
 ## Supporting Data
 The final data table you received, presented in a clean markdown format.
 
 ## Conclusion
-A final paragraph that summarizes the analysis and provides a concluding thought or implication that directly relates to the user's original question.
-
----
-**Begin your response now, selecting the appropriate format based on the user's question.**
+A final paragraph that summarizes the analysis and provides a concluding thought or implication.
 """
 )
 
@@ -797,7 +892,8 @@ def synthesizer_node(state: AgentState) -> Dict[str, Any]:
         "input": state["input"],
         "full_plan": "\n".join(state.get("plan", [])),
         "analysis_summary": analysis_summary, # This is now safe
-        "data_table": data_table_str
+        "data_table": data_table_str,
+        "report_type": state.get("report_type", "direct_answer")
     })
 
     # Use the streaming LLM for the final output
@@ -882,14 +978,15 @@ print("Custom Python Agent Executor created.")
 workflow = StateGraph(AgentState)
 
 # Add the nodes
+workflow.add_node("prompt_enhancer", prompt_enhancer_node)
 workflow.add_node("planner", planner_node)
 workflow.add_node("sql_agent", sql_agent_node)
 workflow.add_node("python_agent", python_agent_node)
 workflow.add_node("synthesizer", synthesizer_node)
 
 # Define the edges
-workflow.set_entry_point("planner")
-
+workflow.set_entry_point("prompt_enhancer")
+workflow.add_edge("prompt_enhancer", "planner")
 # The router will decide the path after each SQL or Python step
 workflow.add_conditional_edges(
     "planner",
@@ -1085,14 +1182,14 @@ async def _process_and_reply_whatsapp(user: str, text: str):
 # whatsapp webhook validate , queue background job , ACK immediately 
 
 @app.post("/twilio/wh")
-async def twilio_webhook(request: Request, background_tasks: BackgroundTasks):
+async def twilio_webhook(request: Request):
     if not (_twilio_client and _validator):
         raise HTTPException(status_code=503, detail="Twilio not configured")
 
     # Twilio posts form-encoded parameters (From, Body, etc.)
     form = dict(await request.form())
 
-    # Normalize URL for signature behind Azure proxy
+    # Normalize URL for signature behind a reverse proxy (same logic you had)
     raw_url = str(request.url)
     if PUBLIC_BASE_URL:
         parts = urlsplit(raw_url)
@@ -1103,13 +1200,15 @@ async def twilio_webhook(request: Request, background_tasks: BackgroundTasks):
     if not _validator.validate(raw_url, form, sig):
         raise HTTPException(status_code=403, detail="Invalid Twilio signature")
 
-    user = (form.get("From") or "").strip()  # e.g., 'whatsapp:+<user>'
+    user = (form.get("From") or "").strip()  # e.g. 'whatsapp:+<user>'
     text = (form.get("Body") or "").strip()
     if not user or not text:
         return ""  # 200 OK; nothing to do
 
-    # Kick off Ask-AI → Summary in the background; ACK immediately to avoid timeout
-    background_tasks.add_task(_process_and_reply_whatsapp, user, text)
+    # ✅ Schedule the async background work properly
+    asyncio.create_task(_process_and_reply_whatsapp(user, text))
+
+    # ACK immediately so Twilio doesn't retry
     return ""  # immediate 200 OK
 
 
