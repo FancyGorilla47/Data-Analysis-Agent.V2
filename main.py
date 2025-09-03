@@ -161,7 +161,8 @@ try:
     openai_GPT4_llm = AzureChatOpenAI(
         openai_api_version=os.environ["AZURE_OPENAI_API_VERSION_GPT4"],
         azure_deployment=os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT_NAME_GPT4"],
-        streaming=False
+        streaming=False,
+        temperature=0.0
     )
 except Exception as e:
     print(f"Error initializing Azure OpenAI clients: {e}")
@@ -222,6 +223,24 @@ def execute_sql_and_get_results(query: str) -> str | List[any]:
         # The agent will see this error message as the tool's output and can use it to self-correct.
         print(f"--- SQL Execution Failed ---\n{e}")
         return f"Query failed with the following error: {e}"
+@tool
+def explore_database_schema(query: str) -> str | List[any]:
+    """
+    Executes a read-only, exploratory SQL query to understand database contents.
+    Use this to discover value distributions, date ranges, or sample data.
+    Example: "SELECT DISTINCT MainIndicatorNameEN FROM Tourism_Indicator_Details"
+    Example: "SELECT COUNT(*) FROM Tourism_Indicator_Details GROUP BY IndicatorType"
+    """
+    print(f"--- 探索 Exploring with schema tool (Query: {query}) ---")
+    try:
+        with engine.connect() as connection:
+            result = connection.execute(text(query))
+            headers = list(result.keys())
+            rows = [list(row) for row in result.fetchall()]
+            return [headers] + rows
+    except Exception as e:
+        return f"Query failed with the following error: {e}"
+
 @tool
 def ask_database_expert(question: str) -> str:
     """
@@ -358,21 +377,17 @@ planner_prompt = ChatPromptTemplate.from_messages(
         (
             "system",
             """You are a world-class Principal Analyst and Strategic Planner. Your sole output is a high-level execution plan for a team of agents to answer a user's business question.
-
-Think Managerially: Focus on what each agent should accomplish, not how. Demand excellence from SQL and Python agents.
-
-SQL Steps: Define high-level business questions only. No table/column names or functions.
-
-PYTHON Steps: Specify business logic, calculations, or transformations on retrieved data.
-
-SYNTHESIZE Step (Critical): Always end with SYNTHESIZE:. This step must integrate all previous work into a flawless, user-ready answer. Ensure it fully reflects the quality of SQL and Python outputs. Mistakes here diminish the value of your team.
-
-Tourism Focus: Only create tasks for tourism KPIs; non-tourism requests go directly to SYNTHESIZE.
-
-Database context: {db_schema}
-
-if user input asks for data in arabic , the entire plan should be choreographed to give an answer in arabic, if the user input was in english then the entire answer should be in english
-
+                Think Managerially: Focus on what each agent should accomplish, not how. Demand excellence from SQL and Python agents.
+        **CRITICAL RULES:**
+            1.   **One Goal Per Agent:** The entire plan must have a **maximum of one** `SQL:` goal, one `PYTHON:` goal, and one `SYNTHESIZE:` goal.
+            2.  **Strictly Adhere to User Intent:** Your primary duty is to create a plan that answers the user's **exact question**. Do not infer a different goal or add assumptions.NEVER ASK FOR LATEST INTERVAL IF THE USER DID NOT ASK FOR IT.
+            3.   **High-Level Goals Only:** Each step must be a high-level objective. Define *what* to achieve, not *how* to do it. The specialist agents will determine the specific implementation.
+            4.   **SQL Steps: Define high-level business questions only. No table/column names or functions.
+            5.   **PYTHON Steps: Specify business logic, calculations, or transformations on retrieved data.
+            6.   **SYNTHESIZE Step (Critical): Always end with SYNTHESIZE:. This step must integrate all previous work into a flawless, user-ready answer. Ensure it fully reflects the quality of SQL and Python outputs. Mistakes here diminish the value of your team.
+            7.   **Tourism Focus: Only create tasks for tourism KPIs;  for database context to understand if the question can be answered by the data available : {db_schema} non-tourism requests go directly to SYNTHESIZE. 
+            8.   **if user input asks for data in arabic , the entire plan should be choreographed to give an answer in arabic, if the user input was in english then the entire answer should be in english
+            
 Analyze the user request and produce the execution plan immediately.
 """,
         ),
@@ -381,6 +396,7 @@ Analyze the user request and produce the execution plan immediately.
 )
 
 planner = planner_prompt | structured_llm
+
 
 
 
@@ -403,29 +419,37 @@ def planner_node(state: AgentState) -> Dict[str, Any]:
     return {"plan": plan_steps}
 
 # --- Add this new prompt definition ---
-custom_sql_tools = [ask_database_expert, execute_sql_and_get_results]
+custom_sql_tools = [ask_database_expert, explore_database_schema, execute_sql_and_get_results]
 custom_sql_agent_prompt = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            """You are an expert MSSQL data analyst agent. Your purpose is to interact with a database to fetch data based on a user's request.
+            """You are an expert MSSQL data analyst agent. Your purpose is to fetch data from a database following a strict workflow.
 
-            **Workflow:**
-            1.  **Analyze the Request**: Understand what the user is asking for.
-            2.  **Consult the Expert**: Your first step MUST be to use the `ask_database_expert` tool. This will give you vital context about table schemas, column meanings, and business rules. THIS TOOL IS FOR CONTEXT AND DATABASE UNDERSTANDING ONLY ,ITS AI SEARCH INDEX WHICH CONTAINS INDEXED JSON ABOUT THE DATABASE CONTENTS 
-            3.  **Construct the Query**: Based on the expert's information, write an accurate and efficient MSSQL query.
-            4.  **Execute the Query**: Use the `execute_sql_and_get_results` tool to run your query.
-            5.  **Return the Result**: The raw output from `execute_sql_and_get_results` will be your final answer. Do not add any conversational text or summaries; the tool's direct output is what's required.
+            **--- Core Workflow: EXPLORE then EXECUTE ---**
 
-                **Query Quality Requirements:**
+            **Phase 1: EXPLORE**
+            Your first priority is to gather all necessary information before attempting to fetch the final data.
+            1.  Use the `ask_database_expert` tool to understand table schemas, column meanings, and relationships.
+            2.  If you need to filter by a specific name (e.g., an indicator name), you MUST verify the exact name first. Use the `explore_database_schema` tool with a `SELECT DISTINCT...` query to get a list of correct names.
+
+            **Phase 2: EXECUTE**
+            Once, and only once, you are certain you have all the correct information (table, columns, exact filter names):
+            1.  Construct the complete, final query to answer the user's request, following all quality rules below.
+            2.  Execute this query using the `execute_sql_and_get_results` tool.
+            3.  **This is your final action.** This tool will terminate your process and return the data directly.
+
+            **--- Tool Guide ---**
+            - `ask_database_expert`: Use FIRST for schema/context.
+            - `explore_database_schema`: Use for iterative discovery (e.g., `SELECT DISTINCT`). Results are returned to you for further thought.
+            - `execute_sql_and_get_results`: Use LAST for final data extraction. This action is final.
+
+            **--- Query Quality Requirements & Mandates ---**
             1.  **BE UNIQUE:** If the user asks for a "list of" items (e.g., "list of indicators", "what categories are available?"), you MUST use the `DISTINCT` keyword to avoid returning thousands of duplicate rows. Example: `SELECT DISTINCT MainIndicatorNameEN, IndicatorType FROM ...`
-            2.  **EFFICIENT QUERYING**: Always construct your query to filter (NOT BY TOP 10 ) as much as you can to retrieve the smallest dataset restricting your querying to a condition that the retreived data would be used to fully asnwer the user input,THIS IS NOT OPTIONAL U MUST FILTER WHERE APPLICABLE.
-            3.  **BE PRECISE:** Never use `SELECT *`. Only select the specific columns needed to answer the user's question.
-            4.  **Nulls** : never clean the data of missing values , as null values themseleves are informative and should be reported as is. 
-            **MANDATES:**
-            - **Always Provide Numerical Context**: Never return a number without its unit or format. This is a non-negotiable rule.
-            - When querying metrics from `Tourism_Indicator_Details` (e.g., Actual, Target), you **MUST** also `SELECT` the `UnitEN` and `Format` columns.
-            - When querying budget columns from `Tourism_Program_Details` (e.g., AllocatedAmount), you **MUST** use a SQL alias to rename the column with a `_QAR` suffix (e.g., `AllocatedAmount AS AllocatedAmount_QAR`).
+            2.  **BE PRECISE:** Never use `SELECT *`. Only select the specific columns needed to answer the user's question.
+            3.  **Nulls**: Never clean the data of missing values, as null values themselves are informative and should be reported as is.
+            4.  **Always Provide Numerical Context**: Never return a number without its unit or format. This is a non-negotiable rule. When querying metrics from `Tourism_Indicator_Details` (e.g., Actual, Target), you **MUST** also `SELECT` the `UnitEN` and `Format` columns.
+            5. **FILTERING RULLE** : NEVER USE 
             """,
         ),
         ("human", "{input}"),
@@ -516,13 +540,16 @@ python_agent_prompt = ChatPromptTemplate.from_messages(
 - **Available Columns:** {column_names}
 
 --- RULES & REQUIREMENTS ---
-1.  **Function-Only Output:** Your output MUST be ONLY the Python code for a single function `def analyze(df: pd.DataFrame) -> pd.DataFrame:`. Do not add any explanation, conversational text, or example usage.
-2.  **Return, Don't Print:** This function MUST take a pandas DataFrame as its only argument and **return** the final, transformed DataFrame as its output. The final line of your function should be a `return df` statement.
-3.  **Encapsulation:** All your logic (imports, helper functions, etc.) must be contained *inside* the `analyze` function. The only code in the global scope should be the `import` statements at the top.
-4.  **Robust Date Handling:** If the task requires parsing dates from a column like 'IntervalValue', your script MUST correctly handle multiple common formats (e.g., 'YYYY-Q#', 'YYYY-MM', 'YYYY'). Create a new sortable 'IntervalDate' column with the results.
-5.  **Data Precision:** Round all final numeric values to a maximum of two decimal places.
-6.  **Forbidden Libraries:** You MUST NOT import any visualization libraries (e.g., matplotlib, seaborn, plotly) or attempt to generate plots.
-7.**Nulls** : never clean the data of missing values , as null values themseleves are informative and should be reported as is. 
+1.  **Data Precision & Final Formatting:** 
+            * First, round its numeric values to a **maximum of two decimal places**. Numbers with fewer than two decimal places (like `6.0` or `4.9`) must remain unchanged.
+            * Second, create a new `ActualFormatted` column. This column must be a **string** that combines the correctly rounded number with its `UnitEN` from the data (e.g., "4.90%", "6.0 k", "12.5 bn QAR").
+2.  **Function-Only Output:** Your output MUST be ONLY the Python code for a single function `def analyze(df: pd.DataFrame) -> pd.DataFrame:`. Do not add any explanation, conversational text, or example usage.
+3.  **Return, Don't Print:** This function MUST take a pandas DataFrame as its only argument and **return** the final, transformed DataFrame as its output. The final line of your function should be a `return df` statement.
+4.  **Encapsulation:** All your logic (imports, helper functions, etc.) must be contained *inside* the `analyze` function. The only code in the global scope should be the `import` statements at the top.
+5.  **Robust Date Handling:** If the task requires parsing dates from a column like 'IntervalValue', your script MUST correctly handle multiple common formats (e.g., 'YYYY-Q#', 'YYYY-MM', 'YYYY'). Create a new sortable 'IntervalDate' column with the results.
+6.  **Data Precision:** Round all final numeric values to a maximum of two decimal places.
+7.  **Forbidden Libraries:** You MUST NOT import any visualization libraries (e.g., matplotlib, seaborn, plotly) or attempt to generate plots.
+8.   **Nulls** : never clean the data of missing values , as null values themseleves are informative and should be reported as is. 
 """
 ),
        ("human", "{input}"),
@@ -670,13 +697,14 @@ First, determine the user's intent: are they asking for a simple fact/list, or d
 - **User's Original Question:** {input}
 - **Final Data Analysis Summary:** {analysis_summary}
 - **Supporting Data Table:** {data_table}
-
+- we are in 2025 right now , so if any data is showing years later then that understand exactly why and dnt report it blindly 
 **--- UNIVERSAL RULES (APPLY TO ALL RESPONSES) ---**
 1.  **EMPTY DATA RULE (Priority 1):** If the `Supporting Data Table` is empty or contains no meaningful results, you **MUST NOT** invent an answer or interpret the absence of data as zeros. Do not show an empty data table. Instead, respond contextually and directly. For example: "Based on the available data, there were no records found for [topic of the user's question]."
 2.  **SCOPE GUARDRAIL (Priority 2):** If the user's question is clearly not about tourism, respond ONLY with: `I can only answer questions related to Qatar's tourism sector.`
 3.  **Supporting Data(priority 3):** :When creating a summary table for your final report, you MUST include the columns that are most critical for understanding the conclusion.
-4. **GREETING** : IF the user input is a simple greeting then just greet him back "Hello! How can I assist you today with your tourism data inquiries?"
-5. **Null Data Handling (Priority 4):** If the data contains NULL or missing values, acknowledge this and mention explicitly that data on this or that is missing , analyze logically and report why would this data be missing. 
+4. **GREETING** : IF the user input is a simple greeting then just greet him back "Hello! I'm here to help with any questions about Qatar's tourism sectors."
+5. **Null Data Handling (Priority 4):** If the data contains NULL or missing values, acknowledge this and mention them in your summary ommitting no detail , but do not include them in the supporting data table unless specifically relevant to the user's question.
+6. **Decimals**: do not omit decimal places , we are dealing with big numbers and every decimal matters , you will recieve data that are already rounded , use them as is 
 ---
 **--- RESPONSE FORMATTING ---**
 *Select ONE of the following formats based on the user's question.*
@@ -686,7 +714,7 @@ First, determine the user's intent: are they asking for a simple fact/list, or d
 
 -   Start with a brief, direct introductory sentence.
 -   Present the data clearly using a bulleted list or a markdown table.
--   Do not write a formal report with sections like "Executive Summary" or "Conclusion." Keep it concise and to the point.
+-   Do not write a formal report just add a small summary of the findings if there is any, if a table and introductory sentence is enough then just provide that.
 
 **FORMAT 2: For Analytical Questions (Analysis, Trends, Comparisons)**
 *Use this format if the user asks for an "analysis," "comparison," "summary," "trend," or a "why/how" question.*
