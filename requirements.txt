@@ -18,11 +18,8 @@ twilio
 gunicorn
 python-multipart
 # --- Additional Analytical Libraries ---
-scipy
 statsmodels
 scikit-learn
-xgboost
-lightgbm
 python-dateutil
 cerberus
 tabulate

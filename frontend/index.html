@@ -13,9 +13,11 @@
         --peek: 44px;
         --log-bg: #2d333b;
         --log-text: #cdd9e5;
-        --fab-h: 40px;
+        --fab-h: 15px;
         --fab-radius: 12px;
         --fab-pad: 0px;
+        --fab-top: 0.4rem;       /* Distance from the top of the browser window */
+        --fab-right: 13.2rem;    /* Distance from the right of the browser window */
       }
       * {
         box-sizing: border-box;
@@ -39,20 +41,31 @@
 
       /* FAB (rectangular image) */
       .fab {
-        position: fixed;
-        right: 22px;
-        bottom: 22px; 
-        padding: var(--fab-pad);
-        border: 0;
-        border-radius: var(--fab-radius);
-        background: transparent;
-        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
-        cursor: pointer;
-        overflow: visible;
-        display: inline-block;
-        z-index: 1100;
-        transition: transform 0.1s ease;
-      }
+          position: fixed;
+          /* Adjust these values until the button is in the perfect spot on your dashboard */
+          top: var(--fab-top);
+          right: var(--fab-right);
+          
+          /* Retain other existing styles for size and appearance */
+          padding: var(--fab-pad);
+          border: 0;
+          border-radius: var(--fab-radius);
+          background: transparent;
+          box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
+          cursor: pointer;
+          overflow: visible;
+          display: inline-block;
+          z-index: 1100; /* Ensure it is on top of other elements */
+          transition: transform 0.1s ease;
+        }
+        @media screen and (min-width: 1600px) {
+          :root {
+            --fab-h: 23px;      /* A larger height for big monitors */
+            --fab-radius: 14px; /* A slightly larger border radius */
+            --fab-top: 0.7rem;    /* A new position from the top for a big screen */
+            --fab-right: 16rem;  /* A new position from the right for a big screen */
+          }
+        }
       .fab:active {
         transform: scale(0.97);
       }
