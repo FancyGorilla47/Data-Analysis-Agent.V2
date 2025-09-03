@@ -6,516 +6,481 @@
     <title>Dashboard (Static) + Chatbot</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@2.4.0/dist/purify.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <style>
-      :root {
-        --radius: 14px;
-        --ring: rgba(0, 0, 0, 0.08);
-        --peek: 44px;
-        --log-bg: #2d333b;
-        --log-text: #cdd9e5;
-        --fab-h: 15px;
-        --fab-radius: 12px;
-        --fab-pad: 0px;
-        --fab-top: 0.4rem;       /* Distance from the top of the browser window */
-        --fab-right: 13.2rem;    /* Distance from the right of the browser window */
-      }
-      * {
-        box-sizing: border-box;
-      }
-      html,
-      body {
-        height: 100%;
-        margin: 0;
-        background: #0b132b;
-      }
+  /* --- CONSOLIDATED VARIABLES --- */
+  :root {
+    --radius: 14px;
+    --ring: rgba(0, 0, 0, 0.08);
+    --peek: 44px;
+    --log-bg: #2d333b;
+    --log-text: #cdd9e5;
 
-      .page {
-        position: fixed;
-        inset: 0;
-        width: 100vw;
-        height: 100vh;
-        object-fit: contain;
-        display: block;
-        background: #0b132b;
-      }
+    /* These are the default values for smaller screens */
+    --fab-font-size: 9px;
+    --fab-padding: 3px 6px;
+    --fab-radius: 10px;
+    --fab-top: 0.35rem;
+    --fab-right: 13.2rem;
 
-      /* FAB (rectangular image) */
-      .fab {
-          position: fixed;
-          /* Adjust these values until the button is in the perfect spot on your dashboard */
-          top: var(--fab-top);
-          right: var(--fab-right);
-          
-          /* Retain other existing styles for size and appearance */
-          padding: var(--fab-pad);
-          border: 0;
-          border-radius: var(--fab-radius);
-          background: transparent;
-          box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
-          cursor: pointer;
-          overflow: visible;
-          display: inline-block;
-          z-index: 1100; /* Ensure it is on top of other elements */
-          transition: transform 0.1s ease;
-        }
-        @media screen and (min-width: 1600px) {
-          :root {
-            --fab-h: 23px;      /* A larger height for big monitors */
-            --fab-radius: 14px; /* A slightly larger border radius */
-            --fab-top: 0.7rem;    /* A new position from the top for a big screen */
-            --fab-right: 16rem;  /* A new position from the right for a big screen */
-          }
-        }
-      .fab:active {
-        transform: scale(0.97);
-      }
-      .fab.hidden {
-        opacity: 0;
-        visibility: hidden;
-        pointer-events: none;
-        transform: scale(0.9);
-        transition: opacity 0.12s, transform 0.12s, visibility 0s linear 0.12s;
-      }
-      .fab-img {
-        display: block;
-        height: var(--fab-h);
-        width: auto;
-        object-fit: contain;
-        border-radius: var(--fab-radius);
-      }
+    /* These are the tuning knobs for the maximized chat view */
+    --max-top-offset: 4.5%;
+    --max-horizontal-margin: 4.8%;
+  }
 
-      /* Chat - Minimized View */
-      .chat {
-        position: fixed;
-        right: 22px;
-        bottom: 90px;
-        width: 360px;
-        height: 60vh;
-        max-height: 700px;
-        background: #fff;
-        color: #0b1020;
-        border-radius: var(--radius);
-        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
-        border: 1px solid #e5e7eb;
-        display: none;
-        flex-direction: column;
-        overflow: hidden;
-        z-index: 1050;
-      }
-      .chat.open {
-        display: flex;
-        animation: slideIn 0.18s ease-out;
-      }
-      @keyframes slideIn {
-        from {
-          transform: translateY(8px);
-          opacity: 0;
-        }
-        to {
-          transform: none;
-          opacity: 1;
-        }
-      }
+  /* Overwrite the size and position for large screens */
+  @media screen and (min-width: 1600px) {
+    :root {
+      --fab-font-size: 12px;
+      --fab-padding: 5px 8px;
+      --fab-radius: 10px;
+      --fab-top: 0.6rem;
+      --fab-right: 16rem;
 
-      /* Header with tabs */
-      .chat header {
-        height: 48px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 0 10px;
-        border-bottom: 1px solid #eef2f7;
-        background: #fff;
-        flex-shrink: 0;
-      }
-      .tabs {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-      }
-      .tab-btn {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 6px 8px;
-        border: 0;
-        background: transparent;
-        border-radius: 8px;
-        cursor: pointer;
-        font: 600 14px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
-        color: #111827;
-      }
-      .tab-btn:hover {
-        background: #f3f4f6;
-      }
-      .tab-btn .tab-dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        background: #cbd5e1;
-      }
-      .tab-btn.active .tab-dot {
-        background: #22d3ee;
-      }
-      .tab-divider {
-        width: 1px;
-        height: 18px;
-        background: #e5e7eb;
-      }
-      .controls {
-        margin-left: auto;
-        display: inline-flex;
-        gap: 8px;
-      }
-      .icon-btn {
-        appearance: none;
-        border: 0;
-        background: transparent;
-        cursor: pointer;
-        padding: 6px;
-        border-radius: 8px;
-      }
-      .icon-btn:hover {
-        background: #f2f4f7;
-      }
-
-      /* Body: panes + console */
-      .chat-body {
-        display: flex;
-        min-height: 0;
-        flex: 1;
-      }
-      .pane {
-        display: flex;
-        flex-direction: column;
-        flex: 1;
-        min-width: 0;
-        background: #fafbfc;
-      }
-      .pane[hidden] {
-        display: none !important;
-      }
-      .messages {
-        padding: 12px 14px;
-        overflow: auto;
-        flex: 1;
-        background: #fafbfc;
-      }
-      
-      .msg {
-        padding: 10px 12px;
-        border-radius: 12px;
-        margin: 6px 0;
-        font: 14px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial;
-        width: -moz-fit-content;
-        width: fit-content; 
-      }
-      .msg.bot {
-        background: #eef2f7;
-        max-width: 85%;
-      }
-      .msg.me {
-        background: #dcfce7;
-        margin-left: auto;
-        max-width: 450px;
-      }
-      .status {
-        text-align: center;
-        padding: 6px 5px;
-        color: #6c757d;
-        font-size: 0.85em;
-        min-height: 1.5em;
-        background: #eef2f7;
-        border-top: 1px solid #e5e7eb;
-        border-bottom: 1px solid #e5e7eb;
-      }
-      .chat form {
-        display: flex;
-        gap: 8px;
-        padding: 10px;
-        border-top: 1px solid #eef2f7;
-        background: #fff;
-      }
-      .chat input[type="text"] {
-        flex: 1;
-        padding: 10px 12px;
-        border-radius: 10px;
-        border: 1px solid #e5e7eb;
-        font-size: 14px;
-        outline: none;
-      }
-      .chat input[type="text"]:focus {
-        border-color: #22d3ee;
-        box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.25);
-      }
-      .chat button.send {
-        padding: 10px 14px;
-        border: 0;
-        border-radius: 10px;
-        background: #0ea5e9;
-        color: #fff;
-        font-weight: 600;
-        cursor: pointer;
-      }
-      .chat .newchat {
-        border: 0;
-        background: transparent;
-        color: #0ea5e9;
-        font-weight: 600;
-        padding: 0 8px;
-      }
-
-      /* Console (logs) */
-      .console {
-        width: 34%;
-        min-width: 340px;
-        max-width: 520px;
-        background: var(--log-bg);
-        color: var(--log-text);
-        display: none;
-        flex-direction: column;
-        border-left: 1px solid rgba(255, 255, 255, 0.06);
-      }
-      .console.visible {
-        display: flex;
-      }
-      .console .log-header {
-        display: flex;
-        align-items: center;
-        justify-content: flex-start;
-        padding: 8px 12px;
-        background: #3e444b;
-        color: #fff;
-        font-size: 0.9rem;
-      }
-      #log-box {
-        flex: 1;
-        overflow: auto;
-        padding: 12px;
-        font-family: "Courier New", Courier, monospace;
-        font-size: 0.85em;
-        line-height: 1.4;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-      .log-message {
-        padding-bottom: 5px;
-        border-bottom: 1px solid #444c56;
-        margin-bottom: 5px;
-      }
-      .log-message:last-child {
-        border-bottom: none;
-        margin-bottom: 0;
-      }
-      :root {
-        --radius: 14px;
-        --ring: rgba(0, 0, 0, 0.08);
-        --peek: 44px;
-        /* ... other variables ... */
-
-        /* === ADD THESE VARIABLES FOR MAXIMIZED POSITIONING === */
-        /* These are your tuning knobs. Adjust them to fit your image. */
-        --max-top-offset: 4.5%;      /* Adjust to move the window up or down */
-        --max-horizontal-margin: 4.8%; /* Adjust to make the window wider or narrower */
-      }
-      @media screen and (min-width: 1600px) {
-        :root {
-          /* Adjust these values for your larger monitor */
-          --max-top-offset: 4.8%; 
-          --max-horizontal-margin: 1.5%;
-        }
-      }
-      /* Max - MODIFIED FOR FRAME EFFECT */
-      /* Max - NEW VERSION FOR FITTING INSIDE THE IMAGE */
-.chat.max {
-  /* Use variables for top and sides */
-  top: var(--max-top-offset);
-  left: var(--max-horizontal-margin);
-  right: var(--max-horizontal-margin);
-
-  /* Use a fixed value for the bottom to restore the original height */
-  bottom: 16px; 
-
-  /* Reset width/height so the positioning properties above take full control */
-  width: auto;
-  height: auto;
-
-  /* Keep the existing frame styles */
-  max-height: none;
-  border-radius: 18px;
-  background: #f8f9fa;
-  border: 1px solid #dee2e6;
-  padding: 16px;
-}
-      
-      /* --- INNER CONTENT STYLES START HERE --- */
-
-      /* 4. Rounds the corners of the header and content pane inside the frame. */
-      .chat.max header,
-      .chat.max .pane {
-          border-radius: 12px;
-      }
-
-      /* 5. Adds a visual gap between the header and the chat body. */
-      .chat.max header {
-          margin-bottom: 16px;
-      }
-      
-      /* This styles the inner content to sit inside the frame */
-      .chat.max header,
-      .chat.max .pane {
-          border-radius: 12px;
-      }
-
-      .chat.max header {
-          margin-bottom: 16px;
-      }
-
-      .chat.max .console.visible {
-        display: flex;
-      }
-
-      @media (max-width: 900px) {
-        .console {
-          display: none !important;
-        }
-      }
-      @media (max-width: 640px) {
-        .chat {
-          right: 12px;
-          bottom: 84px;
-          width: min(96vw, 420px);
-          height: 60vh;
-        }
-        .fab {
-          right: 12px;
-          bottom: 12px;
-        }
-      }
-      
-      .summary-container {
-        display: flex;
-        align-items: flex-start;
-        gap: 8px;
-        width: 100%;
-      }
-      .summary-text {
-        flex-grow: 1;
-      }
-      .play-tts-btn {
-        flex-shrink: 0;
-        margin-top: 8px;
-        width: 32px;
-        height: 32px;
-        border-radius: 50%;
-        border: 1px solid #e5e7eb;
-        background-color: #fff;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: background-color 0.2s, box-shadow 0.2s;
-      }
-      .play-tts-btn:hover {
-        background-color: #f9fafb;
-      }
-      .play-tts-btn:focus {
-        outline: none;
-        box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.3);
-      }
-      .play-tts-btn.playing svg {
-        animation: pulse 1.5s infinite;
-      }
-      @keyframes pulse {
-        0% { transform: scale(1); }
-        50% { transform: scale(1.1); }
-        100% { transform: scale(1); }
-      }
-
-      /* Recommendations */
-      .recommendations {
-          padding: 8px 10px;
-          background: #fafbfc;
-          border-bottom: 1px solid #eef2f7;
-          display: none;
-          flex-direction: row; /* Horizontal layout */
-          gap: 8px;
-          align-items: stretch; /* Make all buttons the same height */
-      }
-      
-      .chat.max .recommendations {
-          display: flex;
-      }
-      .recommendation-btn {
-          flex: 1; /* Each button takes up equal space */
-          min-width: 0; /* Allows buttons to shrink */
-          white-space: normal; /* Allow text to wrap */
-          text-align: left;
-          padding: 8px 12px;
-          border: 1px solid #e5e7eb;
-          background: #fff;
-          border-radius: 10px;
-          font-size: 13px;
-          color: #374151;
-          cursor: pointer;
-          line-height: 1.4;
-          transition: background-color 0.2s, box-shadow 0.2s, transform 0.1s;
-      }
-      .recommendation-btn:hover {
-          background-color: #f9fafb;
-          border-color: #d1d5db;
-      }
-
-      .recommendation-btn:active {
-          transform: scale(0.98);
-          background-color: #f3f4f6;
-      }
-      .recommendation-btn {
-    border-left: 5px solid #286393; /* Deep Navy Blue */
-    transition: background-color 0.2s, border-color 0.2s;
-      }
-
-    .recommendation-btn:hover {
-        background-color: #7c95aa; /* Very light blue for hover */
-      }
-      .messages table {
-        width: 100%;
-        border-collapse: collapse;
-        margin: 12px 0;
-        font-size: 14px;
-        line-height: 1.4;
+      --max-top-offset: 4.8%;
+      --max-horizontal-margin: 1.5%;
     }
+  }
 
-    .messages th,
-    .messages td {
-        border: 1px solid #e2e8f0; /* light gray border */
-        padding: 8px 12px;
-        text-align: left;
-    }
+  /* --- GENERAL STYLES --- */
+  * {
+    box-sizing: border-box;
+  }
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+    background: #0b132b;
+  }
 
-    .messages th {
-        background-color: #f8fafc; /* very light background for headers */
-        font-weight: 600;
-        color: #1a202c;
-    }
+  .page {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    object-fit: contain;
+    display: block;
+    background: #0b132b;
+  }
 
-    .messages tr:nth-child(even) {
-        background-color: #fdfdfe; /* Subtle stripe for readability */
-    }
-
-    .messages table p {
-        margin: 0; /* Remove default paragraph margin inside table cells */
-    }
-    </style>
+  /* --- FAB (Floating Action Button) --- */
+  .fab {
+    position: fixed;
+    top: var(--fab-top);
+    right: var(--fab-right);
+    padding: var(--fab-padding);
+    border: 0;
+    border-radius: var(--fab-radius);
+    background: #286494; /* Button's dark background */
+    color: #fff; /* Icon and text color (white) */
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
+    cursor: pointer;
+    z-index: 1100;
+    transition: background-color 0.2s ease, transform 0.1s ease;
     
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: system-ui, sans-serif;
+    font-size: var(--fab-font-size);
+    font-weight: 600;
+}
+  .fab:hover {
+    background-color: #286393;
+  }
+  .fab:active {
+    transform: scale(0.97);
+  }
+  .fab.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: scale(0.9);
+    transition: opacity 0.12s, transform 0.12s, visibility 0s linear 0.12s;
+  }
+  
+  /* --- CHAT CONTAINER --- */
+  .chat {
+    position: fixed;
+    right: 22px;
+    top: 55px;
+    width: min(90vw, 370px);
+    height: 75vh;
+    max-height: 700px;
+    background: #fff;
+    color: #0b1020;
+    border-radius: var(--radius);
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+    border: 1px solid #e5e7eb;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+    z-index: 1050;
+  }
+  .chat.open {
+    display: flex;
+    animation: slideIn 0.18s ease-out;
+  }
+  @keyframes slideIn {
+    from {
+      transform: translateY(-8px);
+      opacity: 0;
+    }
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
+  @media (max-width: 900px) {
+    .console {
+      display: none !important;
+    }
+  }
+  @media (max-width: 640px) {
+    .chat {
+      right: 12px;
+      bottom: 84px;
+      width: min(100vw, 380px);
+      height: 60vh;
+    }
+    .fab {
+      right: 12px;
+      bottom: 12px;
+    }
+  }
+
+  /* --- CHAT HEADER --- */
+  .chat header {
+    height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 10px;
+    border-bottom: 1px solid #eef2f7;
+    background: #fff;
+    flex-shrink: 0;
+  }
+  .tabs {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 0;
+    background: transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    font: 600 14px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    color: #111827;
+  }
+  .tab-btn:hover {
+    background: #f3f4f6;
+  }
+  .tab-btn .tab-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #cbd5e1;
+  }
+  .tab-btn.active .tab-dot {
+    background: #22d3ee;
+  }
+  .tab-divider {
+    width: 1px;
+    height: 18px;
+    background: #e5e7eb;
+  }
+  .controls {
+    margin-left: auto;
+    display: inline-flex;
+    gap: 8px;
+  }
+  .icon-btn {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 8px;
+  }
+  .icon-btn:hover {
+    background: #f2f4f7;
+  }
+
+  /* --- CHAT BODY & MESSAGES --- */
+  .chat-body {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+  }
+  .pane {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    background: #fafbfc;
+  }
+  .pane[hidden] {
+    display: none !important;
+  }
+  .messages {
+    padding: 12px 14px;
+    overflow: auto;
+    flex: 1;
+    background: #fafbfc;
+  }
+  
+  .msg {
+    padding: 10px 12px;
+    border-radius: 12px;
+    margin: 6px 0;
+    font: 14px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    width: -moz-fit-content;
+    width: fit-content; 
+  }
+  .msg.bot {
+    background: #eef2f7;
+    max-width: 85%;
+  }
+  .msg.me {
+    background: #dcfce7;
+    margin-left: auto;
+    max-width: 450px;
+  }
+  .status {
+    text-align: center;
+    padding: 6px 5px;
+    color: #6c757d;
+    font-size: 0.85em;
+    min-height: 1.5em;
+    background: #eef2f7;
+    border-top: 1px solid #e5e7eb;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .chat form {
+    display: flex;
+    gap: 8px;
+    padding: 10px;
+    border-top: 1px solid #eef2f7;
+    background: #fff;
+  }
+  .chat input[type="text"] {
+    flex: 1;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid #e5e7eb;
+    font-size: 14px;
+    outline: none;
+  }
+  .chat input[type="text"]:focus {
+    border-color: #22d3ee;
+    box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.25);
+  }
+  .chat button.send {
+    padding: 10px 14px;
+    border: 0;
+    border-radius: 10px;
+    background: #0ea5e9;
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .chat .newchat {
+    border: 0;
+    background: transparent;
+    color: #0ea5e9;
+    font-weight: 600;
+    padding: 0 8px;
+  }
+
+  /* --- CONSOLE/LOGS --- */
+  .console {
+    width: 34%;
+    min-width: 340px;
+    max-width: 520px;
+    background: var(--log-bg);
+    color: var(--log-text);
+    display: none;
+    flex-direction: column;
+    border-left: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .console.visible {
+    display: flex;
+  }
+  .console .log-header {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 8px 12px;
+    background: #3e444b;
+    color: #fff;
+    font-size: 0.9rem;
+  }
+  #log-box {
+    flex: 1;
+    overflow: auto;
+    padding: 12px;
+    font-family: "Courier New", Courier, monospace;
+    font-size: 0.85em;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .log-message {
+    padding-bottom: 5px;
+    border-bottom: 1px solid #444c56;
+    margin-bottom: 5px;
+  }
+  .log-message:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+  }
+
+  /* --- MAXIMIZED CHAT STYLES --- */
+  .chat.max {
+    top: var(--max-top-offset);
+    left: var(--max-horizontal-margin);
+    right: var(--max-horizontal-margin);
+    bottom: 16px;
+    width: auto;
+    height: auto;
+    max-height: none;
+    border-radius: 18px;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    padding: 16px;
+  }
+  .chat.max header,
+  .chat.max .pane {
+    border-radius: 12px;
+  }
+  .chat.max header {
+    margin-bottom: 16px;
+  }
+  .chat.max .console.visible {
+    display: flex;
+  }
+  
+  /* --- RECOMMENDATIONS & SUMMARY STYLES --- */
+  .summary-container {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+  }
+  .summary-text {
+    flex-grow: 1;
+  }
+  .play-tts-btn {
+    flex-shrink: 0;
+    margin-top: 8px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid #e5e7eb;
+    background-color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s, box-shadow 0.2s;
+  }
+  .play-tts-btn:hover {
+    background-color: #f9fafb;
+  }
+  .play-tts-btn:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.3);
+  }
+  .play-tts-btn.playing svg {
+    animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
+  }
+  .recommendations {
+    padding: 8px 10px;
+    background: #fafbfc;
+    border-bottom: 1px solid #eef2f7;
+    display: none;
+    flex-direction: row;
+    gap: 8px;
+    align-items: stretch;
+  }
+  .chat.max .recommendations {
+    display: flex;
+  }
+  .recommendation-btn {
+    flex: 1;
+    min-width: 0;
+    white-space: normal;
+    text-align: left;
+    padding: 8px 12px;
+    border: 1px solid #e5e7eb;
+    background: #fff;
+    border-radius: 10px;
+    font-size: 13px;
+    color: #374151;
+    cursor: pointer;
+    line-height: 1.4;
+    transition: background-color 0.2s, box-shadow 0.2s, transform 0.1s;
+  }
+  .recommendation-btn:hover {
+    background-color: #f9fafb;
+    border-color: #d1d5db;
+  }
+  .recommendation-btn:active {
+    transform: scale(0.98);
+    background-color: #f3f4f6;
+  }
+  .recommendation-btn {
+    border-left: 5px solid #286393;
+    transition: background-color 0.2s, border-color 0.2s;
+  }
+  .recommendation-btn:hover {
+    background-color: #7c95aa;
+  }
+  .messages table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  .messages th,
+  .messages td {
+    border: 1px solid #e2e8f0;
+    padding: 8px 12px;
+    text-align: left;
+  }
+  .messages th {
+    background-color: #f8fafc;
+    font-weight: 600;
+    color: #1a202c;
+  }
+  .messages tr:nth-child(even) {
+    background-color: #fdfdfe;
+  }
+  .messages table p {
+    margin: 0;
+  }
+</style>
+  
 </head>
 
 <body>
     <img class="page" src="dashboard.png" alt="Dashboard Screenshot" />
 
-    <button class="fab" id="fab" aria-label="Open chatbot" title="Chat">
-      <img src="askai.png" alt="Ask AI" class="fab-img" />
-    </button>
+   <button class="fab" id="fab" aria-label="Open chatbot" title="Chat">
+    <i class="bi bi-stars"></i>
+    <span>Ask AI</span>
+</button>
 
     <aside class="chat" id="chat" aria-hidden="true">
       <header>
@@ -615,8 +580,7 @@
         </button>
     </div>
 </header>
-
-      <div class="chat-body">
+<div class="chat-body">
         <section
           class="pane"
           id="pane-ask"
@@ -694,7 +658,6 @@
       function openChat() {
         chat.classList.add("open");
         chat.setAttribute("aria-hidden", "false");
-        fab.classList.add("hidden");
         if (window.innerWidth < 560) chat.classList.add("max");
         setTab(activeTab);
         input.focus();
@@ -705,7 +668,13 @@
         hideLogs();
         fab.classList.remove("hidden");
       }
-      fab.addEventListener("click", openChat);
+      fab.addEventListener("click", () => {
+          if (chat.classList.contains("open")) {
+            closeChat();
+          } else {
+            openChat();
+          }
+        });
       closeBtn.addEventListener("click", closeChat);
 
       maximizeBtn.addEventListener("click", () => {
@@ -1019,4 +988,3 @@
     </script>
 </body>
 </html>
-
