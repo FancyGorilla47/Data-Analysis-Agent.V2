@@ -6,6 +6,8 @@
     <title>Dashboard (Static) + Chatbot</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@2.4.0/dist/purify.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <style>
   /* --- CONSOLIDATED VARIABLES --- */
@@ -470,6 +472,62 @@
   .messages table p {
     margin: 0;
   }
+/* --- STYLES FOR PER-MESSAGE EXPORT --- */
+   .bot-message-container {
+    position: relative;
+    width: fit-content;
+    margin-bottom: 10px;
+  }
+
+  .export-bubble-btn {
+    position: absolute;
+    bottom: -2px;
+    left: 83%;      /* Using a percentage for responsive positioning */
+    
+    /* Your new styles */
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background-color: #286393;
+    border: none;
+    color: #FFFFFF;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+    transition: background-color 0.2s, transform 0.1s;
+  }
+
+  /* Rule to show the button on hover */
+  .export-bubble-btn:hover {
+      background-color: #20507a; /* Darker shade on hover */
+  }
+
+  .export-bubble-btn:active {
+      transform: scale(0.92); /* Click effect */
+  }
+   .loading-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #4b5563; /* Muted text color for status */
+    font-style: italic;
+  }
+  .msg.bot.is-loading {
+    min-width: 280px;
+  }
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .spinning {
+    animation: spin 1.2s linear infinite;
+  }
 </style>
   
 </head>
@@ -592,7 +650,6 @@
               Hello Khaled! How can I assist with your data analysis today?
             </div>
           </div>
-          <div class="status" id="status">Ready.</div>
           <div class="recommendations" id="recommendationsContainer">
              <button class="recommendation-btn">What indicators in my sector are at risk of missing their strategic targets?</button>
              <button class="recommendation-btn">Which indicators have improved the most last month, quarter, year and which have declined? take into consideration 2022 to 2024</button>
@@ -643,7 +700,6 @@
       const input = document.getElementById("chatInput");
       const sendButton = document.getElementById("sendButton");
       const newChatButton = document.getElementById("newChatButton");
-      const statusDiv = document.getElementById("status");
       const recommendationsContainer = document.getElementById("recommendationsContainer");
 
 
@@ -772,7 +828,6 @@
           '<div class="msg bot">Hello! How can I assist with your data analysis today?</div>';
         logBox.innerHTML = "";
         summaryBox.innerHTML = '<div class="msg bot">No summary yet.</div>';
-        statusDiv.textContent = "Ready.";
         sendButton.disabled = false;
         input.disabled = false;
         input.focus();
@@ -781,15 +836,28 @@
       async function handleSend() {
         const query = input.value.trim();
         if (!query || sendButton.disabled) return;
+        
+        // ** (No longer setting global variables here) **
 
         addMessage(query, "user");
         input.value = "";
         sendButton.disabled = true;
         input.disabled = true;
 
+        // --- MODIFICATION START ---
+        // Create a CONTAINER for the bot's message and future button
+        const botContainer = document.createElement("div");
+        botContainer.className = "bot-message-container";
+
+        // Create the actual message bubble that will be populated with text
         const botDiv = document.createElement("div");
         botDiv.classList.add("msg", "bot");
-        chatbox.appendChild(botDiv);
+
+        // Add the message bubble to its container, and the container to the chatbox
+        botContainer.appendChild(botDiv);
+        chatbox.appendChild(botContainer);
+        // --- MODIFICATION END ---
+        
         debounceScroll(chatbox);
 
         try {
@@ -831,25 +899,46 @@
                     case "log":
                       addLogMessage(json.message);
                       break;
-                    case "status":
-                      statusDiv.textContent = json.message;
+                   case "status":
+                      botDiv.classList.add('is-loading'); // <-- ADD THIS LINE
+                      botDiv.innerHTML = `<div class="loading-status"><i class="bi bi-arrow-repeat spinning"></i> ${DOMPurify.sanitize(json.message)}</div>`;
+                      debounceScroll(chatbox);
                       break;
-                    case "data":
-                      latestAnswerMarkdown = json.answer || ""; // keep full text for summary
+                   case "data":
+                      botDiv.classList.remove('is-loading'); // <-- ADD THIS LINE
+                      latestAnswerMarkdown = json.answer || "";
                       botDiv.innerHTML = DOMPurify.sanitize(
                         marked.parse(latestAnswerMarkdown)
                       );
                       break;
                     case "error":
+                      botDiv.classList.remove('is-loading'); // <-- ADD THIS LINE
                       botDiv.innerHTML = `<span style="color:#d9534f;">${json.message}</span>`;
-                      statusDiv.textContent = "Error occurred";
                       break;
                     case "end":
                       currentSessionId = json.session_id;
-                      statusDiv.textContent = "Ready.";
-                      // kick off summarization of the latest answer (async, does not block UI)
-                      if (latestAnswerMarkdown?.trim())
+                      
+                      // --- MODIFICATION START ---
+                      // Now that the message is complete, add the export button
+                      if (latestAnswerMarkdown?.trim()) {
+                        // Create a new button for this specific message
+                        const exportButton = document.createElement('button');
+                        exportButton.className = 'export-bubble-btn';
+                        exportButton.innerHTML = '<i class="bi bi-filetype-pdf"></i>';
+
+                        // IMPORTANT: Add a click listener that uses the *current* query and answer
+                        // This creates a "closure" to lock in the correct data for this button.
+                        exportButton.addEventListener('click', () => {
+                            generatePDF(query, latestAnswerMarkdown);
+                        });
+
+                        // Add the new button to the container, right below the message bubble
+                        botContainer.appendChild(exportButton);
+
+                        // Also kick off summarization as before
                         summarizeLatest(latestAnswerMarkdown);
+                      }
+                      // --- MODIFICATION END ---
                       break;
                   }
                 } catch (e) {
@@ -863,7 +952,6 @@
           }
         } catch (err) {
           botDiv.innerHTML = `<span style="color:#d9534f;font-weight:600;">An error occurred:</span><br>${err.message}`;
-          statusDiv.textContent = "Error occurred";
         } finally {
           sendButton.disabled = false;
           input.disabled = false;
@@ -872,7 +960,142 @@
           debounceScroll(logBox);
         }
       }
+      /**
+       * Generates and downloads a PDF from the user's query and the agent's answer.
+       * This version accurately isolates the Markdown table from surrounding text.
+       */
+      function generatePDF(query, answer) {
+        // 1. Initialize jsPDF
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        let finalY = 20; // Initial Y position
 
+        // 2. Render Title and User's Question
+        doc.setFontSize(18);
+        doc.text("Data Analysis Report", 15, finalY);
+        finalY += 12;
+        doc.setFontSize(12);
+        doc.text("Your Question:", 15, finalY);
+        finalY += 8;
+        doc.setFont("helvetica", "normal");
+        const queryLines = doc.splitTextToSize(query, 180);
+        doc.text(queryLines, 15, finalY);
+        finalY += (queryLines.length * 5) + 10;
+
+        // 3. Isolate the table and surrounding text
+        const { preambleText, tableMarkdown, postambleText } = extractReportParts(answer);
+
+        // 4. Render the preamble (Executive Summary, Findings, etc.)
+        if (preambleText) {
+          doc.autoTable({
+            startY: finalY,
+            body: [[preambleText]],
+            theme: 'plain',
+            styles: { fontSize: 10, cellPadding: 0 },
+          });
+          finalY = doc.lastAutoTable.finalY + 10;
+        }
+
+        // 5. Render the "Supporting Data" heading and the table itself
+        if (tableMarkdown) {
+          doc.setFontSize(12);
+          doc.text("Supporting Data", 15, finalY);
+          finalY += 8;
+          
+          const { head, body } = parseMarkdownTable(tableMarkdown);
+          doc.autoTable({
+            startY: finalY,
+            head: head,
+            body: body,
+            theme: 'grid',
+            headStyles: { fillColor: [40, 99, 147] }, // #286393
+            styles: { fontSize: 8, cellPadding: 2 },
+          });
+          finalY = doc.lastAutoTable.finalY + 10;
+        }
+
+        // 6. Render the postamble (Conclusion)
+        if (postambleText) {
+          doc.autoTable({
+            startY: finalY,
+            body: [[postambleText]],
+            theme: 'plain',
+            styles: { fontSize: 10, cellPadding: 0 },
+          });
+        }
+        
+        // 7. Save the PDF
+        doc.save('report.pdf');
+      }
+
+      /**
+       * A robust helper function to separate a report into three parts:
+       * the text before the table, the table itself, and the text after the table.
+       */
+      function extractReportParts(fullText) {
+        const lines = fullText.split('\n');
+        let preambleLines = [];
+        let tableLines = [];
+        let postambleLines = [];
+
+        let state = 'preamble'; // Can be 'preamble', 'table', or 'postamble'
+
+        for (const line of lines) {
+            const isTableLine = line.trim().startsWith('|');
+
+            if (state === 'preamble') {
+                if (isTableLine) {
+                    state = 'table';
+                    tableLines.push(line);
+                } else {
+                    preambleLines.push(line);
+                }
+            } else if (state === 'table') {
+                if (isTableLine) {
+                    tableLines.push(line);
+                } else {
+                    state = 'postamble';
+                    postambleLines.push(line);
+                }
+            } else if (state === 'postamble') {
+                postambleLines.push(line);
+            }
+        }
+        
+        // Remove the "## Supporting Data" heading from the preamble for cleaner output
+        const preambleText = preambleLines.join('\n').replace('## Supporting Data', '').trim();
+
+        return {
+            preambleText: preambleText,
+            tableMarkdown: tableLines.join('\n'),
+            postambleText: postambleLines.join('\n').trim()
+        };
+      }
+
+
+      /**
+       * A more robust helper to parse a Markdown table string.
+       */
+      function parseMarkdownTable(markdown) {
+        const lines = markdown.trim().split('\n');
+        const head = [];
+        const body = [];
+        
+        const processRow = (line) => line.split('|').slice(1, -1).map(cell => cell.trim());
+
+        // The first line is always the header
+        if (lines.length > 0) {
+          head.push(processRow(lines[0]));
+        }
+
+        // Process the rest of the lines as body rows, skipping the separator
+        for (let i = 1; i < lines.length; i++) {
+          if (lines[i].includes('---')) continue; // Skip separator line
+          body.push(processRow(lines[i]));
+        }
+
+        return { head, body };
+      }
       document.getElementById("chatForm").addEventListener("submit", (e) => {
         e.preventDefault();
         handleSend();

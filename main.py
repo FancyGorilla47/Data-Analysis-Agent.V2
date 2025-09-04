@@ -284,7 +284,7 @@ def safe_import(name, globals=None, locals=None, fromlist=(), level=0):
     'prophet', 'darts', 'sktime', 'tsfresh',
 
     # 📋 Tabular/Pretty Formatting (for future use)
-    'tabulate', 'prettytable', 'texttable','typing'
+    'tabulate', 'prettytable', 'texttable','typing',
 
     # 📄 Output Formatting & Enhancement
     'json', 'yaml', 're', 'html', 'csv', 'io', 'base64',
@@ -508,7 +508,7 @@ custom_sql_agent_prompt = ChatPromptTemplate.from_messages(
             - `execute_sql_and_get_results`: Use LAST for final data extraction. This action is final.
 
             **--- Query Quality Requirements & Mandates ---**
-            1.  **TIME AWARENESS (CRITICAL):** NEVER use MAX() on date columns , ALWAYS retrieve historical data , only filter by a specific date when the user explicitly requests it. 
+            1.  **DATE FILTERING** **THIS IS NON NEGOTIABLE** NEVER USE MAX() FUNCTION TO CAPTURE LATEST DATES  , ALWAYS RETRIEVE ALL DATA , only filter by a specific date when the user and planner explicitly requests it. 
             2.  **PROVIDE CONTEXT (CRITICAL):** To ensure downstream agents understand the data, you **MUST** always include the primary identifying column(s) in your `SELECT` statement.
                 -   **THIS IS NON NEGOTIABLE**For the `Tourism_Indicator_Details` table, the key identifier is `MainIndicatorNameEN`, and when you select numerical values **ALWAYS INCLUDE** "UnitEN" and "Format" to give meaning to the values.
                 -   **THIS IS NON NEGOTIABLE**For the `Tourism_Program_Details` table, the key identifiers are `ProgramNameEN` and `ProjectNameEN`.
