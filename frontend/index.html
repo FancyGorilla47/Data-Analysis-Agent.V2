@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Dashboard (Static) + Chatbot</title>
+    <title>Ask AI</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@2.4.0/dist/purify.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -166,6 +166,8 @@
     display: flex;
     align-items: center;
     gap: 12px;
+    flex-wrap: nowrap; /* <-- Add this line */
+    min-width: 0;       /* <-- Also add this for better shrinking */
   }
   .tab-btn {
     display: flex;
@@ -178,6 +180,7 @@
     cursor: pointer;
     font: 600 14px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
     color: #111827;
+    white-space: nowrap;
   }
   .tab-btn:hover {
     background: #f3f4f6;
@@ -482,7 +485,7 @@
   .export-bubble-btn {
     position: absolute;
     bottom: -2px;
-    left: 83%;      /* Using a percentage for responsive positioning */
+    left: 85%;      /* Using a percentage for responsive positioning */
     
     /* Your new styles */
     width: 32px;
@@ -924,7 +927,7 @@
                         // Create a new button for this specific message
                         const exportButton = document.createElement('button');
                         exportButton.className = 'export-bubble-btn';
-                        exportButton.innerHTML = '<i class="bi bi-filetype-pdf"></i>';
+                        exportButton.innerHTML = '<i class="bi bi-file-pdf"></i>';
 
                         // IMPORTANT: Add a click listener that uses the *current* query and answer
                         // This creates a "closure" to lock in the correct data for this button.
