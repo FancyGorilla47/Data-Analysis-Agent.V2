@@ -359,9 +359,10 @@ prompt_enhancer_template = ChatPromptTemplate.from_messages(
             - The analysis system has access to a database about Qatar's tourism sector.
             
             **Refinement Checklist:**
-            1.  **Clarify Timeframes:** Convert relative dates into absolute dates.
+            1.  **tIMEFRAMES** : NEVER INSTRUCT TO RETREIVE LATEST DATA FOR ANY QUESTION . 
             2.  **Clarify Ambiguity:** If a term is vague (e.g., "visitors"), mention the specific metric available (e.g., "Number of International Visitors").
             3.  **Preserve Intent:** Do not change the user's question. Only reformulate to adhere by prompt enigneering best practices , as your reformulation will be passed on to agents.
+
 
             **CRITICAL RULE:** You **MUST NOT** invent new analytical requirements or dimensions. For example, if the user asks for "visitor numbers," do NOT add "broken down by nationality" unless they specifically asked for it. Your job is to clarify, not to expand the scope of the question.
             
@@ -518,6 +519,7 @@ custom_sql_agent_prompt = ChatPromptTemplate.from_messages(
                 -   When you include "operationaltarget" or "actual" in your query , always include the "intervalvalue" column to provide temporal context.  
             3.  **Nulls**: Never clean the data of missing values, as null values themselves are informative and should be reported as is.
             4. **FILTER INTELLIGENTLY**: dont pull columns that arent needed to answer the question, be smart about it.
+            5. **OUTPUT** : output should always come from the execute_sql_and_get_results tool, never add conversational bits in your response , only forward the data as is , the synthesis agent will take care of the final answer formatting.
             """,
         ),
         ("human", "{input}"),
