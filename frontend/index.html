@@ -1,1209 +1,421 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Ask AI</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>InsightIQ - Data Analysis Assistant</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@2.4.0/dist/purify.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <style>
-  /* --- CONSOLIDATED VARIABLES --- */
-  :root {
-    --radius: 14px;
-    --ring: rgba(0, 0, 0, 0.08);
-    --peek: 44px;
-    --log-bg: #2d333b;
-    --log-text: #cdd9e5;
-
-    /* These are the default values for smaller screens */
-    --fab-font-size: 9px;
-    --fab-padding: 3px 6px;
-    --fab-radius: 10px;
-    --fab-top: 0.35rem;
-    --fab-right: 13.2rem;
-
-    /* These are the tuning knobs for the maximized chat view */
-    --max-top-offset: 4.5%;
-    --max-horizontal-margin: 4.8%;
-  }
-
-  /* Overwrite the size and position for large screens */
-  @media screen and (min-width: 1600px) {
-    :root {
-      --fab-font-size: 12px;
-      --fab-padding: 5px 8px;
-      --fab-radius: 10px;
-      --fab-top: 0.6rem;
-      --fab-right: 16rem;
-
-      --max-top-offset: 4.8%;
-      --max-horizontal-margin: 1.5%;
-    }
-  }
-
-  /* --- GENERAL STYLES --- */
-  * {
-    box-sizing: border-box;
-  }
-  html,
-  body {
-    height: 100%;
-    margin: 0;
-    background: #0b132b;
-  }
-
-  .page {
-    position: fixed;
-    inset: 0;
-    width: 100vw;
-    height: 100vh;
-    object-fit: contain;
-    display: block;
-    background: #0b132b;
-  }
-
-  /* --- FAB (Floating Action Button) --- */
-  .fab {
-    position: fixed;
-    top: var(--fab-top);
-    right: var(--fab-right);
-    padding: var(--fab-padding);
-    border: 0;
-    border-radius: var(--fab-radius);
-    background: #286494; /* Button's dark background */
-    color: #fff; /* Icon and text color (white) */
-    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
-    cursor: pointer;
-    z-index: 1100;
-    transition: background-color 0.2s ease, transform 0.1s ease;
-    
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-family: system-ui, sans-serif;
-    font-size: var(--fab-font-size);
-    font-weight: 600;
-}
-  .fab:hover {
-    background-color: #286393;
-  }
-  .fab:active {
-    transform: scale(0.97);
-  }
-  .fab.hidden {
-    opacity: 0;
-    visibility: hidden;
-    pointer-events: none;
-    transform: scale(0.9);
-    transition: opacity 0.12s, transform 0.12s, visibility 0s linear 0.12s;
-  }
-  
-  /* --- CHAT CONTAINER --- */
-  .chat {
-    position: fixed;
-    right: 22px;
-    top: 55px;
-    width: min(90vw, 370px);
-    height: 75vh;
-    max-height: 700px;
-    background: #fff;
-    color: #0b1020;
-    border-radius: var(--radius);
-    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
-    border: 1px solid #e5e7eb;
-    display: none;
-    flex-direction: column;
-    overflow: hidden;
-    z-index: 1050;
-  }
-  .chat.open {
-    display: flex;
-    animation: slideIn 0.18s ease-out;
-  }
-  @keyframes slideIn {
-    from {
-      transform: translateY(-8px);
-      opacity: 0;
-    }
-    to {
-      transform: none;
-      opacity: 1;
-    }
-  }
-  @media (max-width: 900px) {
-    .console {
-      display: none !important;
-    }
-  }
-  @media (max-width: 640px) {
-    .chat {
-      right: 12px;
-      bottom: 84px;
-      width: min(100vw, 380px);
-      height: 60vh;
-    }
-    .fab {
-      right: 12px;
-      bottom: 12px;
-    }
-  }
-
-  /* --- CHAT HEADER --- */
-  .chat header {
-    height: 48px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 0 10px;
-    border-bottom: 1px solid #eef2f7;
-    background: #fff;
-    flex-shrink: 0;
-  }
-  .tabs {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: nowrap; /* <-- Add this line */
-    min-width: 0;       /* <-- Also add this for better shrinking */
-  }
-  .tab-btn {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 8px;
-    border: 0;
-    background: transparent;
-    border-radius: 8px;
-    cursor: pointer;
-    font: 600 14px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
-    color: #111827;
-    white-space: nowrap;
-  }
-  .tab-btn:hover {
-    background: #f3f4f6;
-  }
-  .tab-btn .tab-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: #cbd5e1;
-  }
-  .tab-btn.active .tab-dot {
-    background: #286393;
-  }
-  .tab-divider {
-    width: 1px;
-    height: 18px;
-    background: #e5e7eb;
-  }
-  .controls {
-    margin-left: auto;
-    display: inline-flex;
-    gap: 8px;
-  }
-  .icon-btn {
-    appearance: none;
-    border: 0;
-    background: transparent;
-    cursor: pointer;
-    padding: 6px;
-    border-radius: 8px;
-  }
-  .icon-btn:hover {
-    background: #f2f4f7;
-  }
-
-  /* --- CHAT BODY & MESSAGES --- */
-  .chat-body {
-    display: flex;
-    min-height: 0;
-    flex: 1;
-  }
-  .pane {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-width: 0;
-    background: #fafbfc;
-  }
-  .pane[hidden] {
-    display: none !important;
-  }
-  .messages {
-    padding: 12px 14px;
-    overflow: auto;
-    flex: 1;
-    background: #fafbfc;
-  }
-  
-  .msg {
-    padding: 10px 12px;
-    border-radius: 12px;
-    margin: 6px 0;
-    font: 14px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial;
-    width: -moz-fit-content;
-    width: fit-content; 
-  }
-  .msg.bot {
-    background: #eef2f7;
-    max-width: 85%;
-  }
-  .msg.me {
-    background: #dcfce7;
-    margin-left: auto;
-    max-width: 450px;
-  }
-  .status {
-    text-align: center;
-    padding: 6px 5px;
-    color: #6c757d;
-    font-size: 0.85em;
-    min-height: 1.5em;
-    background: #eef2f7;
-    border-top: 1px solid #e5e7eb;
-    border-bottom: 1px solid #e5e7eb;
-  }
-  .chat form {
-    display: flex;
-    gap: 8px;
-    padding: 10px;
-    border-top: 1px solid #eef2f7;
-    background: #fff;
-  }
-  .chat input[type="text"] {
-    flex: 1;
-    padding: 10px 12px;
-    border-radius: 10px;
-    border: 1px solid #e5e7eb;
-    font-size: 14px;
-    outline: none;
-  }
-  .chat input[type="text"]:focus {
-    border-color: #286493;
-    box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.25);
-  }
-  .chat button.send {
-    padding: 10px 14px;
-    border: 0;
-    border-radius: 10px;
-    background: #286493;
-    color: #fff;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .chat .newchat {
-    border: 0;
-    background: transparent;
-    color: #286393;
-    font-weight: 600;
-    padding: 0 8px;
-  }
-
-  /* --- CONSOLE/LOGS --- */
-  .console {
-    width: 34%;
-    min-width: 340px;
-    max-width: 520px;
-    background: var(--log-bg);
-    color: var(--log-text);
-    display: none;
-    flex-direction: column;
-    border-left: 1px solid rgba(255, 255, 255, 0.06);
-  }
-  .console.visible {
-    display: flex;
-  }
-  .console .log-header {
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    padding: 8px 12px;
-    background: #3e444b;
-    color: #fff;
-    font-size: 0.9rem;
-  }
-  #log-box {
-    flex: 1;
-    overflow: auto;
-    padding: 12px;
-    font-family: "Courier New", Courier, monospace;
-    font-size: 0.85em;
-    line-height: 1.4;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-  .log-message {
-    padding-bottom: 5px;
-    border-bottom: 1px solid #444c56;
-    margin-bottom: 5px;
-  }
-  .log-message:last-child {
-    border-bottom: none;
-    margin-bottom: 0;
-  }
-
-  /* --- MAXIMIZED CHAT STYLES --- */
-  .chat.max {
-    top: var(--max-top-offset);
-    left: var(--max-horizontal-margin);
-    right: var(--max-horizontal-margin);
-    bottom: 16px;
-    width: auto;
-    height: auto;
-    max-height: none;
-    border-radius: 18px;
-    background: #f8f9fa;
-    border: 1px solid #dee2e6;
-    padding: 16px;
-  }
-  .chat.max header,
-  .chat.max .pane {
-    border-radius: 12px;
-  }
-  .chat.max header {
-    margin-bottom: 16px;
-  }
-  .chat.max .console.visible {
-    display: flex;
-  }
-  
-  /* --- RECOMMENDATIONS & SUMMARY STYLES --- */
-  .summary-container {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    width: 100%;
-  }
-  .summary-text {
-    flex-grow: 1;
-  }
-  .play-tts-btn {
-    flex-shrink: 0;
-    margin-top: 8px;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    border: 1px solid #e5e7eb;
-    background-color: #fff;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background-color 0.2s, box-shadow 0.2s;
-  }
-  .play-tts-btn:hover {
-    background-color: #f9fafb;
-  }
-  .play-tts-btn:focus {
-    outline: none;
-    box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.3);
-  }
-  .play-tts-btn.playing svg {
-    animation: pulse 1.5s infinite;
-  }
-  @keyframes pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.1); }
-    100% { transform: scale(1); }
-  }
-  .recommendations {
-    padding: 8px 10px;
-    background: #fafbfc;
-    border-bottom: 1px solid #eef2f7;
-    display: none;
-    flex-direction: row;
-    gap: 8px;
-    align-items: stretch;
-  }
-  .chat.max .recommendations {
-    display: flex;
-  }
-  .recommendation-btn {
-    flex: 1;
-    min-width: 0;
-    white-space: normal;
-    text-align: left;
-    padding: 8px 12px;
-    border: 1px solid #e5e7eb;
-    background: #fff;
-    border-radius: 10px;
-    font-size: 13px;
-    color: #374151;
-    cursor: pointer;
-    line-height: 1.4;
-    transition: background-color 0.2s, box-shadow 0.2s, transform 0.1s;
-  }
-  .recommendation-btn:hover {
-    background-color: #f9fafb;
-    border-color: #d1d5db;
-  }
-  .recommendation-btn:active {
-    transform: scale(0.98);
-    background-color: #f3f4f6;
-  }
-  .recommendation-btn {
-    border-left: 5px solid #286393;
-    transition: background-color 0.2s, border-color 0.2s;
-  }
-  .recommendation-btn:hover {
-    background-color: #7c95aa;
-  }
-  .messages table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 12px 0;
-    font-size: 14px;
-    line-height: 1.4;
-  }
-  .messages th,
-  .messages td {
-    border: 1px solid #e2e8f0;
-    padding: 8px 12px;
-    text-align: left;
-  }
-  .messages th {
-    background-color: #f8fafc;
-    font-weight: 600;
-    color: #1a202c;
-  }
-  .messages tr:nth-child(even) {
-    background-color: #fdfdfe;
-  }
-  .messages table p {
-    margin: 0;
-  }
-/* --- STYLES FOR PER-MESSAGE EXPORT --- */
-   .bot-message-container {
-    position: relative;
-    width: fit-content;
-    margin-bottom: 10px;
-  }
-
-  .export-bubble-btn {
-    position: absolute;
-    bottom: -2px;
-    left: 85%;      /* Using a percentage for responsive positioning */
-    
-    /* Your new styles */
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background-color: #286393;
-    border: none;
-    color: #FFFFFF;
-    display: grid;
-    place-items: center;
-    cursor: pointer;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
-    transition: background-color 0.2s, transform 0.1s;
-  }
-
-  /* Rule to show the button on hover */
-  .export-bubble-btn:hover {
-      background-color: #20507a; /* Darker shade on hover */
-  }
-
-  .export-bubble-btn:active {
-      transform: scale(0.92); /* Click effect */
-  }
-   .loading-status {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    color: #4b5563; /* Muted text color for status */
-    font-style: italic;
-  }
-  .msg.bot.is-loading {
-    min-width: 280px;
-  }
-  @keyframes spin {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
-  .spinning {
-    animation: spin 1.2s linear infinite;
-  }
-</style>
-  
+        :root {
+            --primary-blue: #005a9e; --secondary-blue: #0072bb; --accent-gold: #ffcc00;
+            --text-light: #ffffff; --text-dark: #333333; --bg-light: #f4f6f8;
+            --bg-medium: #e9eef2; --bg-white: #ffffff; --border-color: #d1d8e0;
+            --log-bg: #2d333b; --log-text: #cdd9e5;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Roboto', sans-serif; }
+        html, body { height: 100%; overflow: hidden; background-color: var(--bg-light); color: var(--text-dark); }
+        body { display: flex; flex-direction: column; line-height: 1.5; }
+        header { background-color: var(--primary-blue); padding: 20px; text-align: center; color: var(--text-light); flex-shrink: 0; border-bottom: 4px solid var(--accent-gold); }
+        header h1.header-title { font-size: 1.6rem; font-weight: 500; margin: 0; }
+        .hero { background: var(--secondary-blue); color: var(--text-light); padding: 15px 20px; text-align: center; flex-shrink: 0; box-shadow: inset 0 -2px 4px rgba(0,0,0,0.1); }
+        .hero h2 { font-size: 1.3rem; font-weight: 500; margin-bottom: 3px; }
+        .hero p { font-size: 0.95rem; max-width: 700px; margin: auto; font-weight: 300; }
+        .chat-section { flex-grow: 1; padding: 20px; display: flex; flex-direction: row; gap: 20px; min-height: 0; overflow: hidden; max-width: 1800px; width: 100%; margin: 0 auto; }
+        .chat-container { flex: 3; min-width: 0; border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; background-color: var(--bg-white); box-shadow: 0 5px 15px rgba(0, 50, 100, 0.1); }
+        #chatbox { flex-grow: 1; padding: 25px; overflow-y: auto; background: var(--bg-white); display: flex; flex-direction: column; gap: 12px; }
+        #chatbox::-webkit-scrollbar { width: 8px; }
+        #chatbox::-webkit-scrollbar-track { background: var(--bg-medium); border-radius: 4px; }
+        #chatbox::-webkit-scrollbar-thumb { background-color: var(--border-color); border-radius: 4px; border: 2px solid var(--bg-medium); }
+        #chatbox::-webkit-scrollbar-thumb:hover { background-color: #a8b0b8; }
+        .message { padding: 12px 18px; border-radius: 20px; max-width: 80%; word-wrap: break-word; line-height: 1.45; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08); }
+        .message.user { background: linear-gradient(to bottom right, var(--secondary-blue), var(--primary-blue)); color: var(--text-light); align-self: flex-end; border-bottom-right-radius: 8px; margin-left: auto; }
+        .message.bot {
+            position: relative; /* FIX #1: The bubble is now the parent for positioning */
+            background-color: var(--bg-medium); color: var(--text-dark); align-self: flex-start;
+            border-bottom-left-radius: 8px; margin-right: auto; border: 1px solid #dce1e6;
+            overflow-x: auto;
+        }
+        .message.bot table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.9em; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-radius: 4px; overflow: hidden; }
+        .message.bot th, .message.bot td { border: 1px solid #e1e6ec; padding: 10px 12px; text-align: left; }
+        .message.bot th { background-color: #e9eef2; font-weight: 500; }
+        .message.bot tr:nth-child(even) td { background-color: #f8fafd; }
+        #status { text-align: center; padding: 6px 5px; color: #6c757d; font-size: 0.85em; min-height: 1.5em; background-color: var(--bg-medium); border-top: 1px solid var(--border-color); flex-shrink: 0; line-height: 1.2; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        #inputArea { display: flex; border-top: 1px solid var(--border-color); flex-shrink: 0; background-color: var(--bg-white); }
+        #userInput { flex: 1; padding: 16px; border: none; font-size: 1rem; outline: none; background-color: transparent; }
+        #userInput::placeholder { color: #99a4b0; font-weight: 300; }
+        #sendButton { background-color: var(--secondary-blue); color: var(--text-light); border: none; padding: 0 25px; cursor: pointer; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; transition: background-color 0.2s ease; }
+        #sendButton:hover { background-color: var(--primary-blue); }
+        #sendButton:disabled { background-color: #b0c4de; cursor: not-allowed; }
+        #newChatButton { background-color: transparent; color: var(--primary-blue); border: none; border-right: 1px solid var(--border-color); padding: 0 20px; cursor: pointer; font-size: 1.1rem; transition: color 0.2s ease; }
+        #newChatButton:hover { color: var(--secondary-blue); }
+        #log-container { flex: 2; min-width: 400px; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; background-color: var(--log-bg); box-shadow: 0 5px 15px rgba(0, 50, 100, 0.1); }
+        .log-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 15px; background-color: #3e444b; color: var(--text-light); font-size: 0.9rem; flex-shrink: 0; }
+        .log-header h3 { font-weight: 500; margin: 0; }
+        #hide-logs-btn { background: none; border: 1px solid var(--border-color); color: var(--text-light); padding: 3px 8px; cursor: pointer; border-radius: 5px; font-size: 0.8em; }
+        #log-box { flex-grow: 1; min-height: 0; overflow-y: auto; padding: 15px; color: var(--log-text); font-family: 'Courier New', Courier, monospace; font-size: 0.85em; line-height: 1.4; white-space: pre-wrap; word-break: break-all; }
+        .log-message { padding-bottom: 5px; border-bottom: 1px solid #444c56; margin-bottom: 5px; }
+        .log-message:last-child { border-bottom: none; margin-bottom: 0; }
+        #log-box::-webkit-scrollbar { width: 8px; }
+        #log-box::-webkit-scrollbar-track { background: #22272e; }
+        #log-box::-webkit-scrollbar-thumb { background-color: #58a6ff; border-radius: 4px; }
+        .bot-message-container { align-self: flex-start; width: fit-content; max-width: 80%; }
+        .export-bubble-btn {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background-color: var(--primary-blue);
+            border: none;
+            color: var(--text-light);
+            display: grid;
+            place-items: center;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: opacity 0.2s, transform 0.2s;
+            opacity: 0;
+            transform-origin: center;
+        }
+        .bot-message-container:hover .export-bubble-btn { opacity: 1; transform: scale(1); }
+        .export-bubble-btn:hover { background-color: var(--secondary-blue); }
+        .export-bubble-btn:active { transform: scale(0.92); }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .spinning { animation: spin 1.2s linear infinite; }
+        .hidden { display: none !important; }
+        #show-logs-btn {
+            position: fixed; bottom: 20px; right: 20px; z-index: 1000;
+            background-color: var(--primary-blue); color: var(--text-light);
+            border: 1px solid var(--text-light); border-radius: 8px; padding: 10px 16px;
+            font-size: 1rem; font-weight: 500; cursor: pointer;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            transition: all 0.2s ease-in-out;
+        }
+        #show-logs-btn:hover { background-color: var(--secondary-blue); transform: translateY(-2px); }
+    </style>
 </head>
-
 <body>
-    <img class="page" src="dashboard.png" alt="Dashboard Screenshot" />
-
-   <button class="fab" id="fab" aria-label="Open chatbot" title="Chat">
-    <i class="bi bi-stars"></i>
-    <span>Ask AI</span>
-</button>
-
-    <aside class="chat" id="chat" aria-hidden="true">
-      <header>
-    <nav class="tabs" role="tablist" aria-label="Assistant tabs">
-        <button
-            class="tab-btn active"
-            data-tab="ask"
-            role="tab"
-            aria-selected="true"
-            aria-controls="pane-ask"
-        >
-            <span class="tab-dot" aria-hidden="true"></span><span>Ask AI</span>
-        </button>
-        <div class="tab-divider" aria-hidden="true"></div>
-        <button
-            class="tab-btn"
-            data-tab="summary"
-            role="tab"
-            aria-selected="false"
-            aria-controls="pane-summary"
-        >
-            <span class="tab-dot" aria-hidden="true"></span><span>Summary</span>
-        </button>
-    </nav>
-    <div class="controls">
-        <button
-            class="icon-btn"
-            id="newChatButton"
-            title="New Chat / Refresh"
-            aria-label="New Chat"
-        >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              aria-hidden="true"
-            >
-              <path
-                d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
-              />
-            </svg>
-        </button>
-        <button
-            class="icon-btn"
-            id="logsBtn"
-            title="Show/Hide Logs"
-            aria-label="Logs"
-        >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              aria-hidden="true"
-            >
-              <path
-                d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2-2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm3.5 6.5 2.5 2.5-2.5 2.5-1.5-1.5 1-1-1-1 1.5-1.5zM11 15h5v2h-5v-2z"
-              />
-            </svg>
-        </button>
-        <button
-            class="icon-btn"
-            id="maximizeBtn"
-            title="Maximize / Restore"
-            aria-label="Maximize"
-        >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              aria-hidden="true"
-            >
-              <path
-                d="M7 3h4v2H9v2H7V3zm10 0v4h-2V5h-2V3h4zM7 17h2v2h2v2H7v-4zm10 0h-2v2h-2v2h4v-4z"
-              />
-            </svg>
-        </button>
-        <button
-            class="icon-btn"
-            id="closeBtn"
-            title="Close"
-            aria-label="Close"
-        >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              aria-hidden="true"
-            >
-              <path
-                d="M18.3 5.71 12 12.01l-6.29-6.3-1.41 1.42L10.59 13l-6.3 6.29 1.42 1.41L12 14.41l6.29 6.3 1.41-1.42L13.41 13l6.3-6.29-1.41-1.41z"
-              />
-            </svg>
-        </button>
-    </div>
-</header>
-<div class="chat-body">
-        <section
-          class="pane"
-          id="pane-ask"
-          role="tabpanel"
-          aria-labelledby="Ask AI"
-        >
-          <div class="messages" id="messages">
-            <div class="msg bot">
-              Hello Khaled! How can I assist with your data analysis today?
+    <header>
+        <h1 class="header-title">InsightIQ Data Assistant</h1>
+    </header>
+    <section class="hero">
+        <h2>Welcome to Your Smart Data Assistant</h2>
+        <p>Ask complex questions about your business data in plain language.</p>
+    </section>
+    <section class="chat-section">
+        <div class="chat-container">
+            <div id="chatbox">
+                <div class="message bot">Hello! How can I assist with your data analysis today?</div>
             </div>
-          </div>
-          <div class="recommendations" id="recommendationsContainer">
-             <button class="recommendation-btn">What indicators in my sector are at risk of missing their strategic targets?</button>
-             <button class="recommendation-btn">Which indicators have improved the most last month, quarter, year and which have declined? take into consideration 2022 to 2024</button>
-             <button class="recommendation-btn">Highlight anomalies in my sector indicators. Show me a pattern, on the months there is decline or increase.</button>
-             <button class="recommendation-btn">Which indicators have crossed their thresholds and require immediate attention?</button>
-          </div>
-          <form id="chatForm" autocomplete="off">
-            <input type="text" id="chatInput" placeholder="Ask a question…" />
-            <button class="send" id="sendButton" type="submit">Send</button>
-          </form>
-        </section>
+            <div id="status">Ready.</div>
+            <form id="inputArea">
+                <button id="newChatButton" title="New Chat" type="button"><i class="fas fa-plus"></i></button>
+                <input type="text" id="userInput" placeholder="Ask a question..." autocomplete="off">
+                <button id="sendButton" title="Send Message" type="submit"><i class="fas fa-paper-plane"></i></button>
+            </form>
+        </div>
+        <div id="log-container">
+            <div class="log-header">
+                <h3>Execution Logs</h3>
+                <button id="hide-logs-btn">Hide</button>
+            </div>
+            <div id="log-box"></div>
+        </div>
+    </section>
 
-        <section
-          class="pane"
-          id="pane-summary"
-          role="tabpanel"
-          aria-labelledby="Summary"
-          hidden
-        >
-          <div class="messages" id="summaryBox">
-            <div class="msg bot">No summary yet.</div>
-          </div>
-        </section>
-
-        <aside class="console" id="console">
-          <div class="log-header"><h3>Execution Logs</h3></div>
-          <div id="log-box"></div>
-        </aside>
-      </div>
-    </aside>
+    <button id="show-logs-btn" class="hidden">Show Logs</button>
 
     <script>
-      /* ===== element refs ===== */
-      const fab = document.getElementById("fab");
-      const chat = document.getElementById("chat");
-      const maximizeBtn = document.getElementById("maximizeBtn");
-      const closeBtn = document.getElementById("closeBtn");
-      const logsBtn = document.getElementById("logsBtn");
+    // --- 1. Element References ---
+    const chatbox = document.getElementById('chatbox');
+    const userInput = document.getElementById('userInput');
+    const sendButton = document.getElementById('sendButton');
+    const newChatButton = document.getElementById('newChatButton');
+    const statusDiv = document.getElementById('status');
+    const logBox = document.getElementById('log-box');
+    const logContainer = document.getElementById('log-container');
+    const inputForm = document.getElementById('inputArea');
+    let currentSessionId = null;
+    const hideLogsBtn = document.getElementById('hide-logs-btn');
+    const showLogsBtn = document.getElementById('show-logs-btn');
+    
+    // --- 2. Core UI Functions ---
+    function addMessage(content, sender) { /* (Unchanged) */ }
+    function addLogMessage(content) { /* (Unchanged) */ }
+    const scrollTimeouts = {}; function debounceScroll(el) { /* (Unchanged) */ }
 
-      // Tabs
-      const tabs = document.querySelectorAll(".tab-btn");
-      const paneAsk = document.getElementById("pane-ask");
-      const paneSummary = document.getElementById("pane-summary");
-      let activeTab = "ask";
-
-      // Ask AI elements
-      const chatbox = document.getElementById("messages");
-      const input = document.getElementById("chatInput");
-      const sendButton = document.getElementById("sendButton");
-      const newChatButton = document.getElementById("newChatButton");
-      const recommendationsContainer = document.getElementById("recommendationsContainer");
-
-
-      // Summary pane
-      const summaryBox = document.getElementById("summaryBox");
-
-      // Console
-      const consolePanel = document.getElementById("console");
-      const logBox = document.getElementById("log-box");
-
-      /* ===== open/close ===== */
-      function openChat() {
-        chat.classList.add("open");
-        chat.setAttribute("aria-hidden", "false");
-        if (window.innerWidth < 560) chat.classList.add("max");
-        setTab(activeTab);
-        input.focus();
-      }
-      function closeChat() {
-        chat.classList.remove("open", "max");
-        chat.setAttribute("aria-hidden", "true");
-        hideLogs();
-        fab.classList.remove("hidden");
-      }
-      fab.addEventListener("click", () => {
-          if (chat.classList.contains("open")) {
-            closeChat();
-          } else {
-            openChat();
-          }
-        });
-      closeBtn.addEventListener("click", closeChat);
-
-      maximizeBtn.addEventListener("click", () => {
-        chat.classList.toggle("max");
-        if (!chat.classList.contains("max")) {
-          hideLogs();
-        }
-      });
-
-      window.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && chat.classList.contains("open")) closeChat();
-      });
-
-      /* ===== tabs ===== */
-      function setTab(tab) {
-        activeTab = tab;
-        tabs.forEach((btn) => {
-          const on = btn.dataset.tab === tab;
-          btn.classList.toggle("active", on);
-          btn.setAttribute("aria-selected", on ? "true" : "false");
-        });
-        paneAsk.hidden = tab !== "ask";
-        paneSummary.hidden = tab !== "summary";
-        // Logs only belong to Ask AI
-        if (tab !== "ask") hideLogs();
-        logsBtn.style.visibility = tab === "ask" ? "visible" : "hidden";
-      }
-      tabs.forEach((btn) =>
-        btn.addEventListener("click", () => setTab(btn.dataset.tab))
-      );
-
-      /* ===== Logs behavior ===== */
-      function showLogs() {
-        if (activeTab !== "ask") setTab("ask");
-        if (!chat.classList.contains("max")) chat.classList.add("max");
-        consolePanel.classList.add("visible");
-      }
-      function hideLogs() {
-        consolePanel.classList.remove("visible");
-      }
-      logsBtn.addEventListener("click", () => {
-        if (consolePanel.classList.contains("visible")) hideLogs();
-        else showLogs();
-      });
-      
-      /* ===== Recommendations ===== */
-      recommendationsContainer.addEventListener('click', (e) => {
-          if (e.target.classList.contains('recommendation-btn')) {
-              // Re-create the full question from a shortened version if needed, or just use the text.
-              const questions = {
-                  "Projects at risk of missing targets?": "What projects in my sector are at risk of missing their strategic targets?",
-                  "Which indicators have improved or declined?": "Which indicators have improved the most last month, quarter, year and which have declined? take into consideration 2022 to 2024",
-                  "Highlight anomalies in my sector indicators.": "Highlight anomalies in my sector indicators (unexpected spikes or drops). Show me a pattern, on the months there is decline or increase.",
-                  "Indicators needing immediate attention?": "Which indicators have crossed their thresholds and require immediate attention?"
-              };
-              const questionText = e.target.textContent;
-              const fullQuestion = questions[questionText] || questionText;
-              input.value = fullQuestion;
-              handleSend();
-          }
-      });
-
-
-      /* ===== Chat streaming (Ask AI) ===== */
-      let currentSessionId = null;
-      // BUG FIX: Removed `latestAnswerMarkdown` from this global scope.
-
-      function addMessage(content, sender) {
-        const el = document.createElement("div");
-        el.className = `msg ${sender === "user" ? "me" : "bot"}`;
-        el.textContent = content;
-        chatbox.appendChild(el);
-        debounceScroll(chatbox);
-        return el;
-      }
-      function addLogMessage(content) {
-        const el = document.createElement("div");
-        el.className = "log-message";
-        el.textContent = content;
-        logBox.appendChild(el);
-        debounceScroll(logBox);
-      }
-      const scrollTimeouts = {};
-      function debounceScroll(el) {
-        const id = el.id || Math.random();
-        clearTimeout(scrollTimeouts[id]);
-        scrollTimeouts[id] = setTimeout(() => {
-          el.scrollTop = el.scrollHeight;
-        }, 50);
-      }
-
-      newChatButton.addEventListener("click", () => {
+    // --- 3. Event Listeners ---
+    newChatButton.addEventListener('click', () => {
         currentSessionId = null;
-        chatbox.innerHTML =
-          '<div class="msg bot">Hello! How can I assist with your data analysis today?</div>';
-        logBox.innerHTML = "";
-        summaryBox.innerHTML = '<div class="msg bot">No summary yet.</div>';
+        chatbox.innerHTML = '<div class="message bot">Hello! How can I assist with your data analysis today?</div>';
+        logBox.innerHTML = '';
+        statusDiv.textContent = 'Ready.';
         sendButton.disabled = false;
-        input.disabled = false;
-        input.focus();
-      });
+        userInput.disabled = false;
+        userInput.focus();
+    });
 
-      async function handleSend() {
-        const query = input.value.trim();
-        if (!query || sendButton.disabled) return;
-        
-        // BUG FIX: Declare a variable for this specific message's answer.
-        let answerForThisMessage = "";
+    hideLogsBtn.addEventListener('click', () => {
+        logContainer.classList.add('hidden');
+        showLogsBtn.classList.remove('hidden');
+    });
 
-        addMessage(query, "user");
-        input.value = "";
-        sendButton.disabled = true;
-        input.disabled = true;
+    showLogsBtn.addEventListener('click', () => {
+        logContainer.classList.remove('hidden');
+        showLogsBtn.classList.add('hidden');
+    });
 
-        const botContainer = document.createElement("div");
-        botContainer.className = "bot-message-container";
-
-        const botDiv = document.createElement("div");
-        botDiv.classList.add("msg", "bot");
-
-        botContainer.appendChild(botDiv);
-        chatbox.appendChild(botContainer);
-        
-        debounceScroll(chatbox);
-
-        try {
-          const response = await fetch("/ask_sql", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ query, session_id: currentSessionId }),
-          });
-          if (!response.ok)
-            throw new Error(
-              (await response.text()) || `Network error: ${response.status}`
-            );
-
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-
-            let boundary = buffer.indexOf("\n\n");
-            while (boundary !== -1) {
-              const packet = buffer.substring(0, boundary);
-              buffer = buffer.substring(boundary + 2);
-
-              let eventName = "data",
-                eventData = "";
-              for (const line of packet.split("\n")) {
-                if (line.startsWith("event:")) eventName = line.slice(6).trim();
-                else if (line.startsWith("data:"))
-                  eventData = line.slice(5).trim();
-              }
-
-              if (eventData) {
-                try {
-                  const json = JSON.parse(eventData);
-                  switch (eventName) {
-                    case "log":
-                      addLogMessage(json.message);
-                      break;
-                   case "status":
-                      botDiv.classList.add('is-loading');
-                      botDiv.innerHTML = `<div class="loading-status"><i class="bi bi-arrow-repeat spinning"></i> ${DOMPurify.sanitize(json.message)}</div>`;
-                      debounceScroll(chatbox);
-                      break;
-                   case "data":
-                      botDiv.classList.remove('is-loading');
-                      // BUG FIX: Update the local variable, not the global one.
-                      answerForThisMessage = json.answer || "";
-                      botDiv.innerHTML = DOMPurify.sanitize(
-                        marked.parse(answerForThisMessage)
-                      );
-                      break;
-                    case "error":
-                      botDiv.classList.remove('is-loading');
-                      botDiv.innerHTML = `<span style="color:#d9534f;">${json.message}</span>`;
-                      break;
-                    case "end":
-                      currentSessionId = json.session_id;
-                      
-                      // BUG FIX: Check the local variable.
-                      if (answerForThisMessage?.trim()) {
-                        const exportButton = document.createElement('button');
-                        exportButton.className = 'export-bubble-btn';
-                        exportButton.innerHTML = '<i class="bi bi-file-pdf"></i>';
-
-                        // BUG FIX: The click listener now captures both the correct
-                        // query and the correct answer for this specific message.
-                        exportButton.addEventListener('click', () => {
-                            generatePDF(query, answerForThisMessage);
-                        });
-
-                        botContainer.appendChild(exportButton);
-
-                        // BUG FIX: Summarize using the local variable.
-                        summarizeLatest(answerForThisMessage);
-                      }
-                      break;
-                  }
-                } catch (e) {
-                  console.error("SSE parse failed:", e, eventData);
-                }
-              }
-              boundary = buffer.indexOf("\n\n");
-            }
-            debounceScroll(chatbox);
-            debounceScroll(logBox);
-          }
-        } catch (err) {
-          botDiv.innerHTML = `<span style="color:#d9534f;font-weight:600;">An error occurred:</span><br>${err.message}`;
-        } finally {
-          sendButton.disabled = false;
-          input.disabled = false;
-          input.focus();
-          debounceScroll(chatbox);
-          debounceScroll(logBox);
-        }
-      }
-      /**
-       * Generates and downloads a PDF from the user's query and the agent's answer.
-       * This version accurately isolates the Markdown table from surrounding text.
-       */
-      function generatePDF(query, answer) {
-        // 1. Initialize jsPDF
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF();
-        let finalY = 20; // Initial Y position
-
-        // 2. Render Title and User's Question
-        doc.setFontSize(18);
-        doc.text("Data Analysis Report", 15, finalY);
-        finalY += 12;
-        doc.setFontSize(12);
-        doc.text("Your Question:", 15, finalY);
-        finalY += 8;
-        doc.setFont("helvetica", "normal");
-        const queryLines = doc.splitTextToSize(query, 180);
-        doc.text(queryLines, 15, finalY);
-        finalY += (queryLines.length * 5) + 10;
-
-        // 3. Isolate the table and surrounding text
-        const { preambleText, tableMarkdown, postambleText } = extractReportParts(answer);
-
-        // 4. Render the preamble (Executive Summary, Findings, etc.)
-        if (preambleText) {
-          doc.autoTable({
-            startY: finalY,
-            body: [[preambleText]],
-            theme: 'plain',
-            styles: { fontSize: 10, cellPadding: 0 },
-          });
-          finalY = doc.lastAutoTable.finalY + 10;
-        }
-
-        // 5. Render the "Supporting Data" heading and the table itself
-        if (tableMarkdown) {
-          doc.setFontSize(12);
-          doc.text("Supporting Data", 15, finalY);
-          finalY += 8;
-          
-          const { head, body } = parseMarkdownTable(tableMarkdown);
-          doc.autoTable({
-            startY: finalY,
-            head: head,
-            body: body,
-            theme: 'grid',
-            headStyles: { fillColor: [40, 99, 147] }, // #286393
-            styles: { fontSize: 8, cellPadding: 2 },
-          });
-          finalY = doc.lastAutoTable.finalY + 10;
-        }
-
-        // 6. Render the postamble (Conclusion)
-        if (postambleText) {
-          doc.autoTable({
-            startY: finalY,
-            body: [[postambleText]],
-            theme: 'plain',
-            styles: { fontSize: 10, cellPadding: 0 },
-          });
-        }
-        
-        // 7. Save the PDF
-        doc.save('report.pdf');
-      }
-
-      /**
-       * A robust helper function to separate a report into three parts:
-       * the text before the table, the table itself, and the text after the table.
-       */
-      function extractReportParts(fullText) {
-        const lines = fullText.split('\n');
-        let preambleLines = [];
-        let tableLines = [];
-        let postambleLines = [];
-
-        let state = 'preamble'; // Can be 'preamble', 'table', or 'postamble'
-
-        for (const line of lines) {
-            const isTableLine = line.trim().startsWith('|');
-
-            if (state === 'preamble') {
-                if (isTableLine) {
-                    state = 'table';
-                    tableLines.push(line);
-                } else {
-                    preambleLines.push(line);
-                }
-            } else if (state === 'table') {
-                if (isTableLine) {
-                    tableLines.push(line);
-                } else {
-                    state = 'postamble';
-                    postambleLines.push(line);
-                }
-            } else if (state === 'postamble') {
-                postambleLines.push(line);
-            }
-        }
-        
-        // Remove the "## Supporting Data" heading from the preamble for cleaner output
-        const preambleText = preambleLines.join('\n').replace('## Supporting Data', '').trim();
-
-        return {
-            preambleText: preambleText,
-            tableMarkdown: tableLines.join('\n'),
-            postambleText: postambleLines.join('\n').trim()
-        };
-      }
-
-
-      /**
-       * A more robust helper to parse a Markdown table string.
-       */
-      function parseMarkdownTable(markdown) {
-        const lines = markdown.trim().split('\n');
-        const head = [];
-        const body = [];
-        
-        const processRow = (line) => line.split('|').slice(1, -1).map(cell => cell.trim());
-
-        // The first line is always the header
-        if (lines.length > 0) {
-          head.push(processRow(lines[0]));
-        }
-
-        // Process the rest of the lines as body rows, skipping the separator
-        for (let i = 1; i < lines.length; i++) {
-          if (lines[i].includes('---')) continue; // Skip separator line
-          body.push(processRow(lines[i]));
-        }
-
-        return { head, body };
-      }
-      document.getElementById("chatForm").addEventListener("submit", (e) => {
+    inputForm.addEventListener("submit", (e) => {
         e.preventDefault();
         handleSend();
-      });
-      input.addEventListener("keypress", (e) => {
-        if (e.key === "Enter" && !e.shiftKey) {
-          e.preventDefault();
-          handleSend();
+    });
+
+    // --- 4. Main Streaming and Logic Handler ---
+    async function handleSend() {
+        const query = userInput.value.trim();
+        if (!query || sendButton.disabled) return;
+        let answerForThisMessage = "";
+        addMessage(query, 'user');
+        userInput.value = '';
+        sendButton.disabled = true;
+        userInput.disabled = true;
+        statusDiv.innerHTML = `<i class="fas fa-spinner spinning"></i> Thinking...`;
+        const botContainer = document.createElement("div");
+        botContainer.className = "bot-message-container";
+        const botDiv = document.createElement("div");
+        botDiv.classList.add("message", "bot");
+        botDiv.textContent = "Processing your request...";
+        // Note: The botDiv is appended to the container, and the container to the chatbox
+        // This is done so the :hover selector on the container can show the button,
+        // which will now be appended directly to botDiv.
+        botContainer.appendChild(botDiv);
+        chatbox.appendChild(botContainer);
+        debounceScroll(chatbox);
+        try {
+            const response = await fetch('/ask_sql', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, session_id: currentSessionId }),
+            });
+            if (!response.ok) { throw new Error((await response.text()) || `Network error: ${response.status}`); }
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                let boundary = buffer.indexOf('\n\n');
+                while (boundary !== -1) {
+                    const packet = buffer.substring(0, boundary);
+                    buffer = buffer.substring(boundary + 2);
+                    let eventName = 'data', eventData = '';
+                    for (const line of packet.split('\n')) {
+                        if (line.startsWith('event:')) eventName = line.slice(6).trim();
+                        else if (line.startsWith('data:')) eventData = line.slice(5).trim();
+                    }
+                    if (eventData) {
+                        try {
+                            const json = JSON.parse(eventData);
+                            switch(eventName) {
+                                case 'log': addLogMessage(json.message); break;
+                                case 'status': statusDiv.innerHTML = `<i class="fas fa-spinner spinning"></i> ${DOMPurify.sanitize(json.message)}`; break;
+                                case 'data':
+                                    answerForThisMessage = json.answer || "";
+                                    botDiv.innerHTML = DOMPurify.sanitize(marked.parse(answerForThisMessage));
+                                    break;
+                                case 'error':
+                                    botDiv.innerHTML = `<span style="color: #d9534f;">${json.message}</span>`;
+                                    statusDiv.textContent = 'Error occurred';
+                                    break;
+                                case 'end':
+                                    currentSessionId = json.session_id;
+                                    statusDiv.textContent = 'Ready.';
+                                    if (answerForThisMessage?.trim()) {
+                                        const exportButton = document.createElement('button');
+                                        exportButton.className = 'export-bubble-btn';
+                                        exportButton.title = "Export to PDF";
+                                        exportButton.innerHTML = '<i class="fas fa-file-pdf"></i>';
+                                        exportButton.addEventListener('click', () => { generatePDF(query, answerForThisMessage); });
+                                        // FIX #1: Append to the visible bubble (botDiv)
+                                        botDiv.appendChild(exportButton);
+                                    }
+                                    break;
+                            }
+                        } catch (e) { console.error("SSE parse failed:", e, eventData); }
+                    }
+                    boundary = buffer.indexOf('\n\n');
+                }
+                debounceScroll(chatbox);
+                debounceScroll(logBox);
+            }
+        } catch (err) {
+             botDiv.innerHTML = `<span style="color:#d9534f;font-weight:600;">An error occurred:</span><br>${err.message}`;
+             statusDiv.textContent = 'Error occurred';
+        } finally {
+            sendButton.disabled = false;
+            userInput.disabled = false;
+            userInput.focus();
+            if (statusDiv.innerHTML.includes('spinning')) { statusDiv.textContent = 'Ready.'; }
+            debounceScroll(chatbox);
+            debounceScroll(logBox);
         }
-      });
-      
-      let currentAudio = null;
-      let currentPlayingButton = null;
+    }
 
-      async function playTTS(text, button) {
-          if (currentAudio && !currentAudio.paused) {
-              currentAudio.pause();
-              currentAudio.currentTime = 0;
-              if (currentPlayingButton) {
-                  currentPlayingButton.classList.remove("playing");
-              }
-              if (currentPlayingButton === button) {
-                  currentPlayingButton = null;
-                  currentAudio = null;
-                  return; 
-              }
-          }
+    // --- 5. PDF Generation Functions ---
+function generatePDF(query, answer) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'landscape' });
+    let finalY = 20; // This will track the vertical position on the page
 
-          try {
-              button.classList.add("playing");
-              currentPlayingButton = button;
+    // --- Renders initial header and user query ---
+    doc.setFontSize(18);
+    doc.text("Data Analysis Report", 15, finalY);
+    finalY += 12;
+    doc.setFontSize(12);
+    doc.text("Your Question:", 15, finalY);
+    finalY += 8;
+    doc.setFont("helvetica", "normal");
+    const queryLines = doc.splitTextToSize(query, 260);
+    doc.text(queryLines, 15, finalY);
+    finalY = doc.autoTable.previous.finalY + 10;
 
-              const response = await fetch("/tts", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ text }),
-              });
+    // --- NEW LOGIC: Splits the entire report into text and table chunks ---
+    const chunks = [];
+    let currentChunk = { type: 'text', lines: [] };
+    const lines = answer.split('\n');
 
-              if (!response.ok) {
-                  throw new Error(`TTS service failed: ${response.status}`);
-              }
-
-              const blob = await response.blob();
-              const audioUrl = URL.createObjectURL(blob);
-              currentAudio = new Audio(audioUrl);
-              currentAudio.play();
-
-              currentAudio.onended = () => {
-                  button.classList.remove("playing");
-                  currentPlayingButton = null;
-                  currentAudio = null;
-                  URL.revokeObjectURL(audioUrl);
-              };
-              currentAudio.onerror = () => {
-                  console.error("Audio playback error.");
-                  button.classList.remove("playing");
-                  currentPlayingButton = null;
-                   URL.revokeObjectURL(audioUrl);
-              }
-
-          } catch (error) {
-              console.error("Failed to play TTS:", error);
-              button.classList.remove("playing");
-              currentPlayingButton = null;
-          }
-      }
-
-      async function summarizeLatest(text) {
-          const sumDiv = document.createElement("div");
-          sumDiv.className = "msg bot";
-          sumDiv.textContent = "Summarizing…";
-          summaryBox.innerHTML = "";
-          summaryBox.appendChild(sumDiv);
-
-          try {
-              const res = await fetch("/summarize", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json", "Accept": "application/json" },
-                  body: JSON.stringify({ text }),
-              });
-
-              if (!res.ok) throw new Error((await res.text()) || `Network error: ${res.status}`);
-
-              const j = await res.json();
-              const summaryText = j.summary || j.text || j.answer || "No summary produced.";
-
-              sumDiv.innerHTML = `
-                  <div class="summary-container">
-                      <div class="summary-text">${DOMPurify.sanitize(marked.parse(summaryText))}</div>
-                      <button class="play-tts-btn" aria-label="Play summary">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-                      </button>
-                  </div>
-              `;
-
-              const playButton = sumDiv.querySelector('.play-tts-btn');
-              playButton.addEventListener('click', () => playTTS(summaryText, playButton));
-
-
-          } catch (err) {
-              sumDiv.innerHTML = `<span style="color:#d9534f;">Failed to summarize: ${err.message}</span>`;
-          } finally {
-              debounceScroll(summaryBox);
-          }
-      }
-      
-      window.addEventListener("resize", () => {
-        if (chat.classList.contains("open") && window.innerWidth < 560) {
-          chat.classList.add("max");
-          if (!consolePanel.classList.contains("visible")) hideLogs();
+    for (const line of lines) {
+        const isTableLine = line.trim().startsWith('|');
+        // If we find a table line...
+        if (isTableLine) {
+            // ...and we were in a text chunk, save the text chunk and start a new table chunk.
+            if (currentChunk.type === 'text') {
+                if (currentChunk.lines.join('').trim()) {
+                    chunks.push({ type: 'text', content: currentChunk.lines.join('\n') });
+                }
+                currentChunk = { type: 'table', lines: [line] };
+            } else {
+                currentChunk.lines.push(line);
+            }
+        // If we find a text line...
+        } else {
+            // ...and we were in a table chunk, save the table chunk and start a new text chunk.
+            if (currentChunk.type === 'table') {
+                chunks.push({ type: 'table', content: currentChunk.lines.join('\n') });
+                currentChunk = { type: 'text', lines: [line] };
+            } else {
+                currentChunk.lines.push(line);
+            }
         }
-      });
+    }
+    // Add the final chunk to the array
+    if (currentChunk.lines.join('').trim()) {
+        chunks.push({ type: currentChunk.type, content: currentChunk.lines.join('\n') });
+    }
+
+    // --- Loop through the chunks and render each one correctly ---
+    for (const chunk of chunks) {
+        // Check if the next chunk will fit on the page, otherwise add a new page
+        // (This is a simple check; more complex checks could calculate exact height)
+        if (finalY > 250) { 
+            doc.addPage();
+            finalY = 20;
+        }
+
+        if (chunk.type === 'text') {
+            // Render plain text using autoTable for better wrapping
+            doc.autoTable({
+                startY: finalY,
+                body: [[chunk.content]],
+                theme: 'plain',
+                styles: { fontSize: 10, cellPadding: 0 },
+            });
+            finalY = doc.autoTable.previous.finalY; // Update Y position
+        } else if (chunk.type === 'table') {
+            // Render a markdown table with full styling
+            const { head, body } = parseMarkdownTable(chunk.content);
+            doc.autoTable({
+                startY: finalY + 5, // Add a little space before tables
+                head: head,
+                body: body,
+                theme: 'grid',
+                headStyles: { fillColor: [0, 90, 158] },
+                styles: {
+                    fontSize: 8,
+                    cellPadding: 2,
+                    overflow: 'linebreak',
+                    minCellWidth: 20
+                }
+            });
+            finalY = doc.autoTable.previous.finalY; // Update Y position
+        }
+    }
+
+    // --- Generate a dynamic filename and save ---
+    const now = new Date();
+    const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+    const safeQuery = query.replace(/[\\/*?:"<>|]/g, '').substring(0, 40).trim();
+    const filename = `${safeQuery}_${timestamp}.pdf`;
+    
+    doc.save(filename);
+}
+
+    function extractReportParts(fullText) { /* (Unchanged) */ }
+    function parseMarkdownTable(markdown) { /* (Unchanged) */ }
+
+    // --- 6. Initial Setup ---
+    userInput.focus();
+
+    /*****UNCHANGED FUNCTION DEFINITIONS (kept for completeness) *****/
+    function addMessage(content, sender) {
+        const messageDiv = document.createElement('div');
+        messageDiv.classList.add('message', sender);
+        messageDiv.innerHTML = DOMPurify.sanitize(marked.parse(content));
+        chatbox.appendChild(messageDiv);
+        debounceScroll(chatbox);
+        return messageDiv;
+    }
+    function addLogMessage(content) {
+        const logMessageDiv = document.createElement('div');
+        logMessageDiv.classList.add('log-message');
+        logMessageDiv.textContent = content;
+        logBox.appendChild(logMessageDiv);
+        debounceScroll(logBox);
+    }
+    function debounceScroll(el) {
+        const id = el.id || 'default';
+        clearTimeout(scrollTimeouts[id]);
+        scrollTimeouts[id] = setTimeout(() => { el.scrollTop = el.scrollHeight; }, 50);
+    }
+    function extractReportParts(fullText) {
+        const lines = fullText.split('\n');
+        let preambleLines = [], tableLines = [], postambleLines = [], state = 'preamble';
+        for (const line of lines) {
+            const isTableLine = line.trim().startsWith('|');
+            if (state === 'preamble') { if (isTableLine) { state = 'table'; tableLines.push(line); } else { preambleLines.push(line); } }
+            else if (state === 'table') { if (isTableLine) { tableLines.push(line); } else { state = 'postamble'; postambleLines.push(line); } }
+            else if (state === 'postamble') { postambleLines.push(line); }
+        }
+        const preambleText = preambleLines.join('\n').replace(/##\s*Supporting Data/i, '').trim();
+        return { preambleText: preambleText, tableMarkdown: tableLines.join('\n'), postambleText: postambleLines.join('\n').trim() };
+    }
+    function parseMarkdownTable(markdown) {
+        const lines = markdown.trim().split('\n');
+        const head = [], body = [];
+        const processRow = (line) => line.split('|').slice(1, -1).map(cell => cell.trim());
+        if (lines.length > 0) head.push(processRow(lines[0]));
+        for (let i = 1; i < lines.length; i++) {
+            if (lines[i].includes('---')) continue;
+            body.push(processRow(lines[i]));
+        }
+        return { head, body };
+    }
     </script>
 </body>
 </html>

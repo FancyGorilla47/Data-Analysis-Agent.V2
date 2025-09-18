@@ -1,0 +1,349 @@
+{
+  "tables": [
+   {
+  "name": "COMPANY",
+  "description": "Stores records for both high-level business units ('Operating Units') and their specific 'Inventory Organizations' (e.g., warehouses, offices). CRITICAL WARNING: This is a denormalized table where multiple Inventory Organizations (identified by ORGANIZATION_ID_1 and ORGANIZATION_NAME) can belong to a single Operating Unit (identified by ORGANIZATION_ID). Aggregating financial data using the wrong ID will lead to severely incorrect and duplicated results.",
+  "primary_key": "ORGANIZATION_ID_1",
+  "critical_joins": [
+    "Joins to ORDERS on COMPANY.ORGANIZATION_ID_1 = ORDERS.SHIP_FROM_ORG_ID to analyze performance by the specific warehouse/division that fulfilled an order.",
+    "Joins to ITEM on COMPANY.ORGANIZATION_ID_1 = ITEM.ORGANIZATION_ID to link a warehouse to its item master.",
+    "Joins to CUSTOMER on COMPANY.ORGANIZATION_ID = CUSTOMER.ORG_ID_1.",
+    "Joins to SUBINVENTORY on COMPANY.ORGANIZATION_ID_1 = SUBINVENTORY.ORGANIZATION_ID."
+  ],
+  "RULES": [
+  {
+    "type": "MANDATORY_JOIN_LOGIC",
+    "condition": "When a query requires revenue, profit, or quantity summed by a specific division or organization name.",
+    "instruction": "You MUST join using COMPANY.ORGANIZATION_ID_1 to ORDERS.SHIP_FROM_ORG_ID and use the COMPANY.ORGANIZATION_NAME for grouping."
+  }
+],
+  "columns": [
+    {
+      "name": "BUSINESS_GROUP_ID",
+      "description": "Identifier for the business group the organization belongs to.",
+      "data_type": "int",
+      "business_rules": [],
+      "is_foreign_key_to": null
+    },
+    {
+      "name": "ORGANIZATION_ID",
+      "description": "Identifier for the high-level business unit ('Operating Unit').DO NOT USE THIS ID for calculating revenue by division. Use ORGANIZATION_ID_1 instead.",
+      "data_type": "smallint",
+      "business_rules": [],
+      "is_foreign_key_to": "ORDERS.ORG_ID, CUSTOMER.ORG_ID_1"
+    },
+    {
+      "name": "NAME",
+      "description": "The legal name of the company or high-level business unit.",
+      "data_type": "nvarchar",
+      "business_rules": [],
+      "is_foreign_key_to": null
+    },
+    {
+      "name": "DATE_FROM",
+      "description": "The date from which the organization is active.",
+      "data_type": "datetime",
+      "business_rules": [],
+      "is_foreign_key_to": null
+    },
+    {
+      "name": "SHORT_CODE",
+      "description": "An abbreviated name or code for the organization.",
+      "data_type": "nvarchar",
+      "business_rules": [],
+      "is_foreign_key_to": null
+    },
+    {
+      "name": "SET_OF_BOOKS_ID",
+      "description": "Identifier for the set of accounting books used.",
+      "data_type": "int",
+      "business_rules": [],
+      "is_foreign_key_to": null
+    },
+    {
+      "name": "DEFAULT_LEGAL_CONTEXT_ID",
+      "description": "Identifier for the default legal entity context.",
+      "data_type": "int",
+      "business_rules": [],
+      "is_foreign_key_to": null
+    },
+    {
+      "name": "ORGANIZATION_ID_1",
+      "description": "The primary key representing a physical 'Inventory Organization' (e.g., a warehouse or division). CRITICAL: This is the correct ID to use when calculating revenue or performance for a specific, individual division. It should be joined to ORDERS.SHIP_FROM_ORG_ID.",
+      "data_type": "smallint",
+      "business_rules": [],
+      "is_foreign_key_to": "ITEM.ORGANIZATION_ID, SUBINVENTORY.ORGANIZATION_ID, ORDERS.SHIP_FROM_ORG_ID"
+    },
+    {
+      "name": "BUSINESS_GROUP_ID_1",
+      "description": "Redundant identifier for the business group, associated with the inventory organization.",
+      "data_type": "int",
+      "business_rules": [],
+      "is_foreign_key_to": null
+    },
+    {
+      "name": "ORGANIZATION_CODE",
+      "description": "A short code for the inventory organization.",
+      "data_type": "nvarchar",
+      "business_rules": [],
+      "is_foreign_key_to": null
+    },
+    {
+      "name": "ORGANIZATION_NAME",
+      "description": "The full name of a specific inventory organization (e.g., 'QQP - Consumer - Inventory' warehouse). Use this for grouping after joining on ORGANIZATION_ID_1.",
+      "data_type": "nvarchar",
+      "business_rules": [],
+      "is_foreign_key_to": null
+    },
+    {
+      "name": "SET_OF_BOOKS_ID_1",
+      "description": "Redundant identifier for the set of accounting books, associated with the inventory organization.",
+      "data_type": "int",
+      "business_rules": [],
+      "is_foreign_key_to": null
+    },
+    {
+      "name": "CHART_OF_ACCOUNTS_ID",
+      "description": "Identifier for the chart of accounts used by the organization.",
+      "data_type": "int",
+      "business_rules": [],
+      "is_foreign_key_to": null
+    },
+    {
+      "name": "OPERATING_UNIT",
+      "description": "The operating unit associated with the inventory organization.",
+      "data_type": "smallint",
+      "business_rules": [],
+      "is_foreign_key_to": null
+    },
+    {
+      "name": "LEGAL_ENTITY",
+      "description": "The legal entity associated with the inventory organization.",
+      "data_type": "int",
+      "business_rules": [],
+      "is_foreign_key_to": null
+    }
+  ]
+},
+    {
+      "name": "CUSTOMERS",
+      "description": "A denormalized table containing customer account, party, and site information.",
+      "primary_key": "CUST_ACCOUNT_ID",
+      "critical_joins": [
+        "Joins to ORDERS on CUSTOMERS.CUST_ACCOUNT_ID = ORDERS.SOLD_TO_ORG_ID.",
+        "Joins to COMPANY on CUSTOMERS.ORG_ID_1 = COMPANY.ORGANIZATION_ID."
+      ],
+      "columns": [
+        {
+          "name": "CUST_ACCOUNT_ID", "description": "The unique identifier for a customer's financial account.", "data_type": "int", "business_rules": [], "is_foreign_key_to": "ORDERS.SOLD_TO_ORG_ID"
+        },
+        {
+          "name": "PARTY_ID", "description": "A unique identifier for the customer entity (the 'party').", "data_type": "int", "business_rules": [], "is_foreign_key_to": null
+        },
+        {
+          "name": "LAST_UPDATE_DATE", "description": "Timestamp of the most recent update to the customer account.", "data_type": "datetime", "business_rules": [], "is_foreign_key_to": null
+        },
+        {
+          "name": "ACCOUNT_NUMBER", "description": "The customer's account number.", "data_type": "int", "business_rules": [], "is_foreign_key_to": null
+        },
+        {
+          "name": "STATUS", "description": "Status of the customer account (e.g., 'A' for Active and 'I' for inactive).", "data_type": "char", "business_rules": [], "is_foreign_key_to": null
+        },
+        {
+          "name": "CUSTOMER_TYPE", "description": "Type of customer (e.g., 'R' for Retail).", "data_type": "char", "business_rules": [], "is_foreign_key_to": null
+        },
+        {
+          "name": "ACCOUNT_NAME", "description": "The name of the customer's account.", "data_type": "nvarchar", "business_rules": [], "is_foreign_key_to": null
+        },
+        {
+          "name": "CUST_ACCT_SITE_ID", "description": "Identifier for the customer's account site.", "data_type": "int", "business_rules": [], "is_foreign_key_to": null
+        },
+        {
+          "name": "PARTY_SITE_ID", "description": "Identifier for the party's physical site or address.", "data_type": "int", "business_rules": [], "is_foreign_key_to": null
+        },
+        {
+          "name": "LAST_UPDATE_DATE_1", "description": "Timestamp of the most recent update to the party site.", "data_type": "datetime", "business_rules": [], "is_foreign_key_to": null
+        },
+        {
+          "name": "CREATION_DATE_1", "description": "Timestamp of the party site's creation.", "data_type": "datetime", "business_rules": [], "is_foreign_key_to": null
+        },
+        {
+          "name": "STATUS_1", "description": "Status of the customer account site.", "data_type": "char", "business_rules": [], "is_foreign_key_to": null
+        },
+        {
+            "name": "ORG_ID_1", "description": "Foreign key linking to the ORGANIZATION_ID in the COMPANY table.", "data_type": "smallint", "business_rules": [], "is_foreign_key_to": "COMPANY.ORGANIZATION_ID"
+        },
+        {
+            "name": "LOCATION_ID", "description": "Identifier for the physical location of the customer site.", "data_type": "int", "business_rules": [], "is_foreign_key_to": null
+        },
+        {
+            "name": "STATUS_2", "description": "Status of the party site.", "data_type": "char", "business_rules": [], "is_foreign_key_to": null
+        },
+        {
+            "name": "PARTY_SITE_NAME", "description": "The name of the party site, often including a location descriptor.", "data_type": "nvarchar", "business_rules": [], "is_foreign_key_to": null
+        }
+      ]
+    },
+    {
+        "name": "ITEM_AGENCY", "description": "Lookup table for item agencies.", "primary_key": "FLEX_VALUE", "critical_joins": ["Joins to MTL_CATS on ITEM_AGENCY.FLEX_VALUE = MTL_CATS.SEGMENT1"],
+        "columns": [
+            {"name": "FLEX_VALUE", "description": "The unique identifier for the item agency.", "data_type": "int", "business_rules": [], "is_foreign_key_to": "MTL_CATS.SEGMENT1"},
+            {"name": "DESCRIPTION", "description": "The name of the item agency.", "data_type": "nvarchar", "business_rules": [], "is_foreign_key_to": null}
+        ]
+    },
+    {
+        "name": "ITEM_BRAND", "description": "Lookup table for item brands.", "primary_key": "FLEX_VALUE", "critical_joins": ["Joins to MTL_CATS on ITEM_BRAND.FLEX_VALUE = MTL_CATS.SEGMENT5"],
+        "columns": [
+            {"name": "FLEX_VALUE", "description": "The unique identifier for the item brand.", "data_type": "int", "business_rules": [], "is_foreign_key_to": "MTL_CATS.SEGMENT5"},
+            {"name": "DESCRIPTION", "description": "The name of the item brand.", "data_type": "nvarchar", "business_rules": [], "is_foreign_key_to": null}
+        ]
+    },
+    {
+        "name": "ITEM_CATEGORY", "description": "Lookup table for item categories.", "primary_key": "FLEX_VALUE", "critical_joins": ["Joins to MTL_CATS on ITEM_CATEGORY.FLEX_VALUE = MTL_CATS.SEGMENT3"],
+        "columns": [
+            {"name": "FLEX_VALUE", "description": "The unique identifier for the item category.", "data_type": "int", "business_rules": [], "is_foreign_key_to": "MTL_CATS.SEGMENT3"},
+            {"name": "DESCRIPTION", "description": "The name of the item category.", "data_type": "nvarchar", "business_rules": [], "is_foreign_key_to": null}
+        ]
+    },
+    {
+  "name": "ITEM",
+  "description": "Stores the master list of all products (items) that can be sold or stored in inventory.",
+  "primary_key": "INVENTORY_ITEM_ID",
+  "critical_joins": [
+    "Joins to ORDERS on ITEM.INVENTORY_ITEM_ID = ORDERS.INVENTORY_ITEM_ID.",
+    "Joins to MTL_CATS on ITEM.INVENTORY_ITEM_ID = MTL_CATS.INVENTORY_ITEM_ID and ITEM.ORGANIZATION_ID = MTL_CATS.ORGANIZATION_ID for secondary/all category assignments.",
+    "Joins to COMPANY on ITEM.ORGANIZATION_ID = COMPANY.ORGANIZATION_ID_1."
+  ],
+  "columns": [
+    {"name": "INVENTORY_ITEM_ID", "description": "A unique identifier for each item.", "data_type": "int", "business_rules": [], "is_foreign_key_to": "ORDERS.INVENTORY_ITEM_ID, MTL_CATS.INVENTORY_ITEM_ID"},
+    {"name": "ORGANIZATION_ID", "description": "Foreign key to COMPANY.ORGANIZATION_ID_1.", "data_type": "smallint", "business_rules": [], "is_foreign_key_to": "COMPANY.ORGANIZATION_ID_1, MTL_CATS.ORGANIZATION_ID"},
+    {"name": "LAST_UPDATE_DATE", "description": "Timestamp of the most recent update.", "data_type": "datetime", "business_rules": [], "is_foreign_key_to": null},
+    {"name": "CREATION_DATE", "description": "Timestamp of record creation.", "data_type": "datetime", "business_rules": [], "is_foreign_key_to": null},
+    {"name": "DESCRIPTION", "description": "A detailed description of the item.", "data_type": "nvarchar", "business_rules": [], "is_foreign_key_to": null},
+    {"name": "SEGMENT1", "description": "The item's code or part number.", "data_type": "bigint", "business_rules": [], "is_foreign_key_to": null},
+    {"name": "ALLOWED_UNITS_LOOKUP_CODE", "description": "A code for the allowed units of measure.", "data_type": "int", "business_rules": [], "is_foreign_key_to": null},
+    {"name": "SALES_ACCOUNT", "description": "Identifier for the sales account associated with the item.", "data_type": "int", "business_rules": [], "is_foreign_key_to": null},
+    {"name": "ITEM_TYPE", "description": "The type of the item (e.g., 'FOOD', 'NON FOOD').", "data_type": "nvarchar", "business_rules": [], "is_foreign_key_to": null},
+    {
+      "name": "PrimaryAgencyID",
+      "description": "The item's primary agency for financial reporting. Foreign key to ITEM_AGENCY.FLEX_VALUE.",
+      "data_type": "INT",
+      "business_rules": [],
+      "is_foreign_key_to": "ITEM_AGENCY.FLEX_VALUE"
+    },
+    {
+      "name": "PrimaryCategoryID",
+      "description": "The item's primary category for financial reporting. Foreign key to ITEM_CATEGORY.FLEX_VALUE.",
+      "data_type": "INT",
+      "business_rules": [],
+      "is_foreign_key_to": "ITEM_CATEGORY.FLEX_VALUE"
+    },
+    {
+      "name": "PrimaryBrandID",
+      "description": "The item's primary brand for financial reporting. Foreign key to ITEM_BRAND.FLEX_VALUE.",
+      "data_type": "INT",
+      "business_rules": [],
+      "is_foreign_key_to": "ITEM_BRAND.FLEX_VALUE"
+    }
+  ]
+},
+    {
+      "name": "MTL_CATS",
+      "description": "This table links items to their respective categories, brands, and agencies.",
+      "primary_key": null,
+      "critical_joins": [
+        "Joins to ITEM on MTL_CATS.INVENTORY_ITEM_ID = ITEM.INVENTORY_ITEM_ID and MTL_CATS.ORGANIZATION_ID = ITEM.ORGANIZATION_ID.",
+        "Joins to ITEM_AGENCY on MTL_CATS.SEGMENT1 = ITEM_AGENCY.FLEX_VALUE.",
+        "Joins to ITEM_CATEGORY on MTL_CATS.SEGMENT3 = ITEM_CATEGORY.FLEX_VALUE.",
+        "Joins to ITEM_BRAND on MTL_CATS.SEGMENT5 = ITEM_BRAND.FLEX_VALUE."
+      ],
+      "columns": [
+        {"name": "INVENTORY_ITEM_ID", "description": "Foreign key to the ITEM table.", "data_type": "int", "business_rules": [], "is_foreign_key_to": "ITEM.INVENTORY_ITEM_ID"},
+        {"name": "ORGANIZATION_ID", "description": "Foreign key to the ITEM table.", "data_type": "smallint", "business_rules": [], "is_foreign_key_to": "ITEM.ORGANIZATION_ID"},
+        {"name": "CATEGORY_SET_ID", "description": "Identifier for the category set being used.", "data_type": "int", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "CATEGORY_ID", "description": "Identifier for the category.", "data_type": "int", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "LAST_UPDATE_DATE", "description": "Timestamp of the most recent update.", "data_type": "datetime", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "CREATION_DATE", "description": "Timestamp of record creation.", "data_type": "datetime", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "CATEGORY_ID_1", "description": "A redundant identifier for the category.", "data_type": "int", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "SEGMENT1", "description": "Foreign key to ITEM_AGENCY.FLEX_VALUE.", "data_type": "int", "business_rules": [], "is_foreign_key_to": "ITEM_AGENCY.FLEX_VALUE"},
+        {"name": "SEGMENT3", "description": "Foreign key to ITEM_CATEGORY.FLEX_VALUE.", "data_type": "int", "business_rules": [], "is_foreign_key_to": "ITEM_CATEGORY.FLEX_VALUE"},
+        {"name": "SEGMENT5", "description": "Foreign key to ITEM_BRAND.FLEX_VALUE.", "data_type": "int", "business_rules": [], "is_foreign_key_to": "ITEM_BRAND.FLEX_VALUE"}
+      ]
+    },
+    {
+      "name": "ORDERS",
+      "description": "Contains denormalized sales order header and line item details, one ",
+      "primary_key": "LINE_ID",
+      "critical_joins": [
+        "The only valid path from ORDERS to ITEM_AGENCY, ITEM_BRAND, or ITEM_CATEGORY is through the ITEM and MTL_CATS tables in sequence. Direct joins are not possible.",
+        "Joins to COMPANY on ORDERS.ORG_ID = COMPANY.ORGANIZATION_ID.",
+        "Joins to COMPANY on ORDERS.SHIP_FROM_ORG_ID = COMPANY.ORGANIZATION_ID_1.",
+        "Joins to CUSTOMERS on ORDERS.SOLD_TO_ORG_ID = CUSTOMERS.CUST_ACCOUNT_ID.",
+        "Joins to SUBINVENTORY on ORDERS.SUBINVENTORY = SUBINVENTORY.SECONDARY_INVENTORY_NAME.",
+        "Joins to SALESPERSONS on ORDERS.SALESREP_ID = SALESPERSONS.SALESREP_ID."
+      ],
+      "RULES": [
+        {
+            "type" : "MANDATORY_QUERY_PATTERN",
+            "condition" :"When a query requires BOTH a SUM of revenue from ORDERS AND a JOIN to MTL_CATS (for agency, brand, or category details).",
+            "instruction" :"To prevent severe revenue inflation, you MUST pre-aggregate the revenue from the ORDERS table in a separate, initial query step. The subsequent query can then join this pre-aggregated result to ITEM and MTL_CATS.",
+            "consequence_of_failure": "The final revenue numbers will be severely inflated and incorrect."
+        }
+      ],
+      "columns": [
+        {"name": "HEADER_ID", "description": "Identifier for the order header,this value can be duplicated as each order can contain many different orders", "data_type": "int", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "ORG_ID", "description": "Foreign key to COMPANY.ORGANIZATION_ID.", "data_type": "smallint", "business_rules": [], "is_foreign_key_to": "COMPANY.ORGANIZATION_ID"},
+        {"name": "ORDER_TYPE_ID", "description": "Identifier for the type of order.", "data_type": "smallint", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "ORDER_NUMBER", "description": "The unique number for the sales order.", "data_type": "int", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "ORDERED_DATE", "description": "The date the order was placed.", "data_type": "datetime", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "PRICE_LIST_ID", "description": "Identifier for the price list used.", "data_type": "smallint", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "SOLD_TO_ORG_ID", "description": "Foreign key to CUSTOMERS.CUST_ACCOUNT_ID.", "data_type": "int", "business_rules": [], "is_foreign_key_to": "CUSTOMERS.CUST_ACCOUNT_ID"},
+        {"name": "SHIP_FROM_ORG_ID", "description": "Foreign key to COMPANY.ORGANIZATION_ID_1.", "data_type": "smallint", "business_rules": [], "is_foreign_key_to": "COMPANY.ORGANIZATION_ID_1"},
+        {"name": "SALESREP_ID", "description": "Foreign key to the SALESPERSONS table.", "data_type": "int", "business_rules": [], "is_foreign_key_to": "SALESPERSONS.SALESREP_ID"},
+        {"name": "LINE_ID", "description": "Unique identifier for the order line.", "data_type": "int", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "ORDERED_ITEM", "description": "The item code that was ordered.", "data_type": "bigint", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "ORDERED_QUANTITY", "description": "The quantity of the item ordered.", "data_type": "float", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "INVENTORY_ITEM_ID", "description": "Foreign key to the ITEM table.", "data_type": "int", "business_rules": [], "is_foreign_key_to": "ITEM.INVENTORY_ITEM_ID"},
+        {"name": "UNIT_SELLING_PRICE", "description": "The per-unit price at which the item was sold.", "data_type": "decimal", "business_rules": ["Total revenue for a line item is calculated as ORDERED_QUANTITY * UNIT_SELLING_PRICE."], "is_foreign_key_to": null},
+        {"name": "UNIT_LIST_PRICE", "description": "The listed per-unit price of the item.", "data_type": "decimal", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "SUBINVENTORY", "description": "The subinventory from which the item was shipped.", "data_type": "nvarchar", "business_rules": [], "is_foreign_key_to": "SUBINVENTORY.SECONDARY_INVENTORY_NAME"}
+      ]
+    },
+    {
+      "name": "SALESPERSONS",
+      "description": "Stores information about salespeople.",
+      "primary_key": "SALESREP_ID",
+      "critical_joins": ["Joins to ORDERS on SALESPERSONS.SALESREP_ID = ORDERS.SALESREP_ID."],
+      "columns": [
+        {"name": "ORGANIZATION_ID", "description": "Foreign key to the COMPANY table.", "data_type": "smallint", "business_rules": [], "is_foreign_key_to": "COMPANY.ORGANIZATION_ID"},
+        {"name": "SALESREP_ID", "description": "Unique identifier for the salesperson.", "data_type": "int", "business_rules": [], "is_foreign_key_to": "ORDERS.SALESREP_ID"},
+        {"name": "USERCODE", "description": "The user code of the salesperson.", "data_type": "int", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "EMPLOYEENUMBER", "description": "The employee number of the salesperson.", "data_type": "int", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "USERNAME", "description": "The full name of the salesperson.", "data_type": "nvarchar", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "USERALTNAME", "description": "An alternative name for the salesperson.", "data_type": "nvarchar", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "USERPHONE", "description": "The salesperson's phone number.", "data_type": "bigint", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "USERADDRESS", "description": "The salesperson's address.", "data_type": "nvarchar", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "USEREMAIL", "description": "The salesperson's email address.", "data_type": "nvarchar", "business_rules": [], "is_foreign_key_to": null}
+      ]
+    },
+    {
+      "name": "SUBINVENTORY",
+      "description": "Stores information about subinventories, which are subdivisions of inventory organizations.",
+      "primary_key": "SECONDARY_INVENTORY_NAME",
+      "critical_joins": [
+        "Joins to ORDERS on SUBINVENTORY.SECONDARY_INVENTORY_NAME = ORDERS.SUBINVENTORY.",
+        "Joins to COMPANY on SUBINVENTORY.ORGANIZATION_ID = COMPANY.ORGANIZATION_ID_1."
+      ],
+      "columns": [
+        {"name": "SECONDARY_INVENTORY_NAME", "description": "The unique name of the subinventory.", "data_type": "nvarchar", "business_rules": [], "is_foreign_key_to": "ORDERS.SUBINVENTORY"},
+        {"name": "ORGANIZATION_ID", "description": "Foreign key to COMPANY.ORGANIZATION_ID_1.", "data_type": "smallint", "business_rules": [], "is_foreign_key_to": "COMPANY.ORGANIZATION_ID_1"},
+        {"name": "LAST_UPDATE_DATE", "description": "Timestamp of the most recent update.", "data_type": "datetime", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "CREATION_DATE", "description": "Timestamp of record creation.", "data_type": "datetime", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "DESCRIPTION", "description": "A description of the subinventory.", "data_type": "nvarchar", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "ASSET_INVENTORY", "description": "Flag indicating if it is an asset inventory.", "data_type": "int", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "STATUS_ID", "description": "Identifier for the status of the subinventory.", "data_type": "int", "business_rules": [], "is_foreign_key_to": null},
+        {"name": "SUBINVENTORY_TYPE", "description": "The type of subinventory.", "data_type": "int", "business_rules": [], "is_foreign_key_to": null}
+      ]
+    }
+  ]
+}

@@ -38,47 +38,11 @@ import statistics
 import json
 import re
 
-#TWILIO IMPORTS############################
 
-#--- added from the implementation of whatsapp 
-from typing import Optional  # add Optional
-from fastapi import  HTTPException , BackgroundTasks ,Request # add HTTPException
-from urllib.parse import urlsplit, urlunsplit  # for Twilio signature normalization
-
-# Twilio
-import twilio 
-from twilio.rest import Client
-from twilio.request_validator import RequestValidator
-
-#--- end 
-
-####################  added  twilio  ##################
 
 # --- 1. Initialization (Runs once on server start) ---
 load_dotenv()
 
-#adding twilio env variables 
-TWILIO_ACCOUNT_SID= os.getenv("TWILIO_ACCOUNT_SID", "")
-TWILIO_AUTH_TOKEN= os.getenv("TWILIO_AUTH_TOKEN", "")          # <-- fixed getenv
-TWILIO_WHATSAPP_FROM= os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")
-PUBLIC_BASE_URL= (os.getenv("PUBLIC_BASE_URL") or "").rstrip("/")
-
-ALLOWED_ORIGINS = [
-    o.strip() for o in (os.getenv("ALLOWED_ORIGINS", "http://localhost:8080")).split(",")
-    if o.strip()
-]
-print("Environment variables loaded.")
-
-
-#----------twilio setup--------------- 
-_twilio_client: Optional[Client] = None
-_validator: Optional[RequestValidator] = None
-if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_WHATSAPP_FROM:
-    _twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-    _validator = RequestValidator(TWILIO_AUTH_TOKEN)
-    print("Twilio WhatsApp enabled.")
-else:
-    print("Twilio WhatsApp not configured (missing env vars).")
 
 ####################  added  twilio  ##################
 
@@ -172,11 +136,6 @@ try:
 except Exception as e:
     print(f"Error initializing Azure OpenAI clients: {e}")
     raise
-
-from summary import create_summary_agent_and_router, _extract_output_text
-summary_agent_executor, summary_router = create_summary_agent_and_router(openai_O3_llm)
-app.include_router(summary_router)
-
 
 # 1b) Build SQLAlchemy engine
 raw_conn_str = os.getenv("AZURE_SQL_CONNECTION_STRING")
@@ -356,10 +315,10 @@ prompt_enhancer_template = ChatPromptTemplate.from_messages(
             """You are a prompt optimization expert. Your task is to refine a user's raw query into a detailed, unambiguous prompt for a data analysis system.
               **CONVERSATIONAL**: if the user input is conversational then forward it as is. 
             **Context:**
-            - The analysis system has access to a database about Qatar's tourism sector.
+            - The analysis system has access to a database about a companies distribution data .
             
             **Refinement Checklist:**
-            1.  **tIMEFRAMES** : NEVER INSTRUCT TO RETREIVE LATEST DATA FOR ANY QUESTION . 
+            1.  **TIMEFRAMES** : NEVER INSTRUCT TO RETREIVE LATEST DATA FOR ANY QUESTION . 
             2.  **Clarify Ambiguity:** If a term is vague (e.g., "visitors"), mention the specific metric available (e.g., "Number of International Visitors").
             3.  **Preserve Intent:** Do not change the user's question. Only reformulate to adhere by prompt enigneering best practices , as your reformulation will be passed on to agents.
 
@@ -398,25 +357,39 @@ structured_llm = openai_GPT4_llm.with_structured_output(Plan)
 DB_SCHEMA = "Error: Schema file could not be loaded."
 try:
     # This block executes only once when the server starts.
-    with open("tourism_schema.json", 'r') as f:
+    # FIX: Corrected the filename to match the one you uploaded.
+    with open("table_infoDB_v2.json", 'r') as f:
         schema_data = json.load(f)
     
     schema_string = ""
     # Use .get("tables", []) to safely handle cases where the key might be missing
     for table in schema_data.get("tables", []):
-        # FIX: Changed table['name'] to table['table_name']
-        schema_string += f"Table Name: `{table['table_name']}`\n"
-        schema_string += f"Description: {table['description']}\n"
+        # FIX 1: The key for the table name in your JSON is 'name', not 'table_name'.
+        table_name = table.get('name')
+        if not table_name:
+            continue # Skip if the table has no name
+
+        schema_string += f"Table Name: `{table_name}`\n"
+        schema_string += f"Description: {table.get('description', 'N/A')}\n"
         schema_string += "Columns:\n"
         
         for col in table.get("columns", []):
-            schema_string += f"  - `{col['column_name']}` ({col['data_type']}): {col['description']}\n"
+            # FIX 2: Handle both 'column_name' and 'name' keys for column names.
+            column_name = col.get('column_name') or col.get('name')
+            if not column_name:
+                continue # Skip if the column has no name
+
+            data_type = col.get('data_type', 'unknown')
+            description = col.get('description', 'N/A')
+            schema_string += f"  - `{column_name}` ({data_type}): {description}\n"
         schema_string += "\n"
         
     DB_SCHEMA = schema_string.strip()
     print("Database schema loaded into memory.")
+except FileNotFoundError:
+    print(f"CRITICAL ERROR: The file 'table_infoDB_v2.json' was not found.")
 except Exception as e:
-    print(f"CRITICAL ERROR: Could not load db_schema.json. Planner will not have context. Error: {e}")
+    print(f"CRITICAL ERROR: Could not load or parse the schema file. Planner will not have context. Error: {e}")
     # Optional: re-raise the exception to stop the server if the schema is critical
     # raise
 
@@ -429,27 +402,33 @@ planner_prompt = ChatPromptTemplate.from_messages(
             """You are a world-class Principal Analyst and Strategic Planner. Your sole output is a high-level execution plan for a team of agents to answer a user's business question.
                 Think Managerially: Focus on what each agent should accomplish, not how. Demand excellence from SQL and Python agents.
 
-         **Your First Responsibility:**
+        **Your First Responsibility:**
             Analyze the user's request to determine the required report format.
             - Choose 'direct_answer' for simple, fact-based questions (e.g., "what is...", "list all...", "how many...").
             - Choose 'full_report' for analytical questions that require interpretation (e.g., "analysis of...", "compare...", "what are the trends...").
 
-        **CRITICAL RULES:**
-            1.   **CONVERSATIONAL PROMPTS:** If the user input is conversational (e.g., "Hello", "How are you?"), your plan should be to respond conversationally without invoking SQL or Python agents.
-            2.   **One Goal Per Agent:** The entire plan must have a **maximum of one** `SQL:` goal, one `PYTHON:` goal, and one `SYNTHESIZE:` goal.
-            3.   **LITERAL INTERPRETATION (NO ASSUMPTIONS):** Your primary duty is to create a plan that answers the user's **exact, literal question**.
-                 - **DO NOT ADD CONTEXT:** If the user asks for "sector contribution to GDP," your plan is to get exactly that. **You MUST NOT infer they want the "latest" or "most recent" value unless they explicitly use those words.**
+            **CRITICAL RULES:**
+            1.  **Look Ahead:** Your primary goal is to create a plan where each step enables the next. The `SQL` step's description **MUST** be comprehensive enough to provide all the raw data needed for the `PYTHON` step.
+            2.  **Comprehensive SQL Goal:** The `SQL:` step should not just ask for the final aggregated answer. It must instruct the agent to retrieve a detailed, denormalized dataset. If the `PYTHON` step needs to rank items by quantity, the `SQL` step **MUST** include retrieving item names and quantities in its goal.
+                - **Bad Plan:**
+                    - `SQL: Retrieve total revenue per salesperson for each item category.`
+                    - `PYTHON: Find the top salesperson and then find their best-selling item.`
+                - **Good Plan:**
+                    - `SQL: Retrieve a detailed dataset of all orders, joining to get salesperson names, item category descriptions, individual item descriptions, and the quantity sold for each item.`
+                    - `PYTHON: From the detailed dataset, first find the top salesperson by total revenue in each category. Then, for that salesperson, find the best-selling item by quantity.`
+            3.   **CONVERSATIONAL PROMPTS:** If the user input is conversational (e.g., "Hello", "How are you?"), your plan should be to respond conversationally without invoking SQL or Python agents.
+            4.   **LITERAL INTERPRETATION (NO ASSUMPTIONS):** Your primary duty is to create a plan that answers the user's **exact, literal question**.
                  - **IF NO TIME IS SPECIFIED, GET ALL TIME:** If a user does not specify a date, year, or time-based filter (like "latest" or "in 2023"), the plan **MUST** be to retrieve all available data for that metric across all time periods.
                  - **Example:**
                      - User: "What is the sector contribution to GDP?"
                      - **BAD PLAN:** "SQL: Retrieve the *most recent* sector contribution to GDP."
                      - **GOOD PLAN:** "SQL: Retrieve all records for sector contribution to GDP."
-            4.   **High-Level Goals Only:** Each step must be a high-level objective. Define *what* to achieve, not *how* to do it. The specialist agents will determine the specific implementation.
-            5.   **SQL Steps: Define high-level business questions only. No table/column names or functions, ONLY FORCE THE SQL AGENT TO EXTRACT UNITS AND FORMATS WHENEVER NUMERICAL VALUES ARE NEEDED TO ANSWER THE QUESTION.** 
-            6.   **PYTHON Steps: Specify business logic, calculations, or transformations on retrieved data, even for simple tasks , you should pass a python steps so he sorts it and format it correctly.
-            7.   **SYNTHESIZE Step (Critical): Always end with SYNTHESIZE:. This step must integrate all previous work into a flawless, user-ready answer. Ensure it fully reflects the quality of SQL and Python outputs. Mistakes here diminish the value of your team.
-            8.   **Tourism Focus: Only create tasks for tourism KPIs;  for database context to understand if the question can be answered by the data available : {db_schema} non-tourism requests go directly to SYNTHESIZE. 
-            9.   **if user input asks for data in arabic , the entire plan should be choreographed to give an answer in arabic, if the user input was in english then the entire answer should be in english
+            5.   **High-Level Goals Only:** Each step must be a high-level objective. Define *what* to achieve, not *how* to do it. The specialist agents will determine the specific implementation.
+            6.   **SQL Steps: Define high-level business questions only, you should give the agent instruction on extracting on all the columns needed that are needed downstream 
+            7.   **PYTHON Steps: Specify business logic, calculations, or transformations on retrieved data, even for simple tasks , you should pass a python steps so he sorts it and format it correctly.
+            8.   **SYNTHESIZE Step (Critical): Always end with SYNTHESIZE:. This step must integrate all previous work into a flawless, user-ready answer. Ensure it fully reflects the quality of SQL and Python outputs. Mistakes here diminish the value of your team.
+            9.   **DATA Focus: Only create tasks for The data in hand;  for database context to understand if the question can be answered by the data available : {db_schema} non-related requests are sent directly to the synthesizer stating its " out of scope". 
+            10.   **if user input asks for data in arabic , the entire plan should be choreographed to give an answer in arabic, if the user input was in english then the entire answer should be in english
             
 Analyze the user request and produce the execution plan immediately.
 """,
@@ -500,29 +479,25 @@ custom_sql_agent_prompt = ChatPromptTemplate.from_messages(
 
             **Phase 2: EXECUTE**
             Once, and only once, you are certain you have all the correct information (table, columns, exact filter names):
-            1.  Construct the complete, final query to answer the user's request, following all quality rules below.
-            2.  Execute this query using the `execute_sql_and_get_results` tool.
-            3.  **This is your final action.** This tool will terminate your process and return the data directly.
+            1.  **MANDATORY ID ENRICHMENT**
+                 - For **every** query that returns an ID, you **MUST** immediately perform a subsequent query to fetch its corresponding name or description.
+                 - ALWAYS try your best to filter with a where clause or preaggregate to limit the number of rows returned.
+            2.  Construct the complete, final query to answer the user's request, following all quality rules below.
+            3.  Execute this query using the `execute_sql_and_get_results` tool.
+            4.  **This is your final action.** This tool will terminate your process and return the data directly.
 
             **--- Tool Guide ---**
-            - `ask_database_expert`: Use FIRST for schema/context.
+            - `ask_database_expert`: Use FIRST for schema/context, this is index data that is static about the database (metadata,joins, rules on how to handle the database). 
             - `explore_database_schema`: Use for iterative discovery (e.g., `SELECT DISTINCT`). Results are returned to you for further thought.
             - `execute_sql_and_get_results`: Use LAST for final data extraction. This action is final.
 
             **--- Query Quality Requirements & Mandates ---**
-            1.  **DATE FILTERING** **THIS IS NON NEGOTIABLE** NEVER USE MAX() FUNCTION TO CAPTURE LATEST DATES  , ALWAYS RETRIEVE ALL DATA , only filter by a specific date when the user and planner explicitly requests it. 
-            2.  **PROVIDE CONTEXT (CRITICAL):** To ensure downstream agents understand the data, you **MUST** always include the primary identifying column(s) in your `SELECT` statement.
-                -   **THIS IS NON NEGOTIABLE**For the `Tourism_Indicator_Details` table, the key identifier is `MainIndicatorNameEN`, and when you select numerical values **ALWAYS INCLUDE** "UnitEN" and "Format" to give meaning to the values.
-                -   **THIS IS NON NEGOTIABLE**For the `Tourism_Program_Details` table, the key identifiers are `ProgramNameEN` and `ProjectNameEN`.
-                -   When selecting numerical metrics, you must also include their corresponding unit and format columns (e.g., `UnitEN`, `Format`).
-                -   When you include "strategictarget" in your query , always include the "targetyear" column to provide temporal context, NEVER user targetyear in any other case than when you include strategictarget, Especially when filtering for the latest or most recent values.
-                -   When you include "operationaltarget" or "actual" in your query , always include the "intervalvalue" column to provide temporal context.  
-            3.  **Nulls**: Never clean the data of missing values, as null values themselves are informative and should be reported as is.
-            4. **FILTER INTELLIGENTLY**: dont pull columns that arent needed to answer the question, be smart about it.
-            5. **OUTPUT** : output should always come from the execute_sql_and_get_results tool, never add conversational bits in your response , only forward the data as is , the synthesis agent will take care of the final answer formatting.
+            1.  **DATE FILTERING** **THIS IS NON NEGOTIABLE** NEVER USE MAX() FUNCTION TO CAPTURE LATEST DATES  , ALWAYS RETRIEVE ALL DATA , only filter by a specific date when the user and planner explicitly requests it.   
+            2.  **Nulls**: Never clean the data of missing values, as null values themselves are informative and should be reported as is.
+            3. **OUTPUT** : output should always come from the execute_sql_and_get_results tool, never add conversational bits in your response , only forward the data as is , the synthesis agent will take care of the final answer formatting.
             """,
         ),
-        ("human", "{input}"),
+        ("human", "Here is the full plan:\n{full_plan}\n\nExecute the SQL portion of this plan now."),
         MessagesPlaceholder(variable_name="agent_scratchpad"),
     ]
 )
@@ -611,46 +586,13 @@ python_agent_prompt = ChatPromptTemplate.from_messages(
 - **Available Columns:** {column_names}
 
 --- RULES & REQUIREMENTS ---
-1.  **Data Precision & Formatting Logic:** Your script must reformat values based on their uniten and format columns. This is the most critical step. Do NOT simply concatenate strings. You must apply the following precise, rule-based logic:
-
     **Step A: Numerical Rounding**
-    - Before formatting, ensure all key numeric columns (`Actual`, `OperationalTarget`, etc.) are rounded to a maximum of two decimal places. Preserve integers (e.g., `61.0` should become `61`).
-
-    **Step B: Intelligent String Formatting for `ActualFormatted`**
-    - The logic for creating the `ActualFormatted` string depends on the content of the `Format` column. You must analyze it for each row.
-
-    - **Rule 1: If `Format` contains letters (e.g., 'm', 'k').**
-        - In this case, the `Format` column dictates the entire format.
-        - The number should be formatted to match the decimal places shown in the `Format` string.
-        - The letters from the `Format` string should be used as the suffix.
-        - **IGNORE** the `UnitEN` column for this rule.
-        - **Example:**
-            - `Actual` = 0.0876, `Format` = '0.0m'
-            - Rounded `Actual` is 0.09.
-            - `Format` '0.0m' implies one decimal place and the letter 'm'.
-            - **Correct `ActualFormatted` Output:** `'0.1m'`
-
-    - **Rule 2: If `Format` is purely a number (e.g., '0', '0.0').**
-        - In this case, the `Format` column only controls the number of decimal places for the rounded `Actual` value.
-        - The `UnitEN` column provides the suffix.
-        - **Example 1:**
-            - `Actual` = 11.899, `Format` = '0', `UnitEN` = 'bn QAR'
-            - Rounded `Actual` is 11.9.
-            - **Correct `ActualFormatted` Output:** `'11.9 bn QAR'`
-        - **Example 2:**
-            - `Actual` = 61.0, `Format` = '0', `UnitEN` = '%'
-            - Rounded `Actual` is 61.
-            - **Correct `ActualFormatted` Output:** `'61%'`
-
-    - **Summary of Logic:** For each row, check `Format`. If it has letters, use it to format the number. If it only has digits, use `UnitEN` as the suffix.
+    - Before formatting, ensure all key numeric columns  are rounded to a maximum of two decimal places. Preserve integers (e.g., `61.0` should become `61`).
+1.  **CRITICAL DATA TYPE HANDLING:** If you encounter a `TypeError` involving 'decimal.Decimal', you MUST explicitly convert the Decimal column to a float *before* performing any calculations. For example: `df['column_name'] = df['column_name'].astype(float)`. This is a mandatory first step in your script if that error occurs.
 2.  **Function-Only Output:** Your output MUST be ONLY the Python code for a single function `def analyze(df: pd.DataFrame) -> pd.DataFrame:`. Do not add any explanation, conversational text, or example usage.
 3.  **Return, Don't Print:** This function MUST take a pandas DataFrame as its only argument and **return** the final, transformed DataFrame as its output. The final line of your function should be a `return df` statement.
 4.  **Encapsulation:** All your logic (imports, helper functions, etc.) must be contained *inside* the `analyze` function. The only code in the global scope should be the `import` statements at the top.
-5.  **Robust Date Handling:** If the task requires parsing dates from a column like 'IntervalValue', your script MUST correctly handle multiple common formats (e.g., 'YYYY-Q#', 'YYYY-MM', 'YYYY'). Create a new sortable 'IntervalDate' column with the results.
-6.  **Data Precision:** Round all final numeric values to a maximum of two decimal places.
-7.  **Forbidden Libraries:** You MUST NOT import any visualization libraries (e.g., matplotlib, seaborn, plotly) or attempt to generate plots.
-8.   **Nulls** : never clean the data of missing values , as null values themseleves are informative and should be reported as is.
-9.   **Units & Formats** : Always include the unit and format columns when selecting numerical metrics to provide context.
+5.  **Forbidden Libraries:** You MUST NOT import any visualization libraries (e.g., matplotlib, seaborn, plotly) or attempt to generate plots.
 """
 ),
        ("human", "{input}"),
@@ -803,12 +745,13 @@ You have been instructed to generate a '{report_type}' style response. You MUST 
 **--- UNIVERSAL RULES (APPLY TO ALL RESPONSES) ---**
 1.  **CONVERSATIONAL PROMPTS:** If the user input is conversational (e.g., "Hello", "How are you?"), your plan should be to respond conversationally
 2.  **EMPTY DATA RULE (Priority 1):** If the `Supporting Data Table` is empty or contains no meaningful results, you **MUST NOT** invent an answer. Do not show an empty data table. Instead, respond contextually: "Based on the available data, there were no records found for [topic of the user's question]."
-3.  **SCOPE GUARDRAIL (Priority 2):** If the user's question is clearly not about tourism, respond ONLY with: `I can only answer questions related to Qatar's tourism sector.`
+3.  **SCOPE GUARDRAIL (Priority 2):** If the user's question is flagged by out of scope in the planner's plan, respond ONLY with: `i do not have data to answer this question` 
 4.  **SUPPORTING DATA (Priority 3):** When creating a summary table for your final report, you MUST include the columns that are most critical for understanding the conclusion.
-5.  **GREETING (Priority 4):** If the user input is a simple greeting, greet them back with: "Hello! I'm here to help with any questions about Qatar's tourism sectors."
+5.  **GREETING (Priority 4):** If the user input is a simple greeting, greet them back with: "Hello! I'm here to help with any questions about your data analysis needs."
 6.  **NULL DATA HANDLING (Priority 5):** If the data contains NULL or missing values, acknowledge this in your summary. Do not omit this detail, but do not include them in the supporting data table unless specifically relevant.
 7.  **DECIMALS (Priority 6):** Do not omit decimal places. The data you receive is already rounded correctly; use the values as-is.
 8.  **LANGUAGE:** If the user's question is in Arabic, respond in Arabic. If it's in English, respond in English.
+9. ** UNIT:** money currency should be presented in QAR (Qatari Riyal) if the user input was in english , if the user input was in arabic then the values should be presented in ريال قطري 
 ---
 **--- RESPONSE FORMATTING ---**
 *Select the format below that matches the instructed '{report_type}'.*
@@ -1105,117 +1048,6 @@ async def ask_sql_endpoint(request: QueryRequest):
         yield await send_event("end", {})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-
-
-########################### TWILIO Whatsapp INTEGRATION ########################################
-
-# ADD THIS NEW FUNCTION IN ITS PLACE
-
-async def run_full_agent_graph(question: str) -> str:
-    """
-    Runs the entire multi-agent graph for a given question and returns the
-    final synthesized report.
-    """
-    try:
-        # Define the initial state for the graph
-        initial_state = {"input": question, "sql_results": []}
-        
-        # Use ainvoke to run the graph to completion and get the final state
-        final_state = await app_graph.ainvoke(initial_state)
-        
-        # Extract the final report from the completed state
-        final_report = final_state.get("final_report", "")
-        
-        print(f"Graph finished for WhatsApp. Final Report: {final_report[:100]}...")
-        return final_report or "**Error: The agent did not produce a final report.**"
-
-    except Exception as e:
-        print(f"--- Error running full agent graph ---\n{e}")
-        traceback.print_exc()
-        return f"**An error occurred while processing the request:** {e}"
-
-# ALSO ADD THIS FUNCTION (it was correct before but needs to be re-added)
-async def summarize_text_once(answer_md: str) -> str:
-    """
-    Runs the Summary agent one-shot on the Ask-AI markdown and returns the summary.
-    """
-    try:
-        out = await summary_agent_executor.ainvoke({"input": "", "answer_md": answer_md})
-        md = _extract_output_text(out)
-        return md or ""
-    except Exception as e:
-        return f"**Failed to summarize:** {e}"
-
-
-# background worker do both agents then send excat summary to whatsapp 
-
-# MODIFY THIS FUNCTION
-
-async def _process_and_reply_whatsapp(user: str, text: str):
-    """
-    Background worker that runs the full agent graph, summarizes the result,
-    and sends it back to the user via WhatsApp.
-    """
-    try:
-        # This is the line that changes:
-        answer_md = await run_full_agent_graph(text)
-
-        # The rest of the function stays the same
-        summary_md = await summarize_text_once(answer_md)
-        if not summary_md.strip():
-            summary_md = "Sorry, I couldn't produce a summary for the result."
-
-        if _twilio_client:
-            _twilio_client.messages.create(
-                from_=TWILIO_WHATSAPP_FROM,
-                to=user,
-                body=summary_md
-            )
-    except Exception as e:
-        print(f"--- WhatsApp processing failed ---\n{e}")
-        traceback.print_exc()
-        if _twilio_client:
-            _twilio_client.messages.create(
-                from_=TWILIO_WHATSAPP_FROM,
-                to=user,
-                body="Sorry, a critical error occurred while handling your request."
-            )
-
-#-----IMP ------
-# whatsapp webhook validate , queue background job , ACK immediately 
-
-@app.post("/twilio/wh")
-async def twilio_webhook(request: Request):
-    if not (_twilio_client and _validator):
-        raise HTTPException(status_code=503, detail="Twilio not configured")
-
-    # Twilio posts form-encoded parameters (From, Body, etc.)
-    form = dict(await request.form())
-
-    # Normalize URL for signature behind a reverse proxy (same logic you had)
-    raw_url = str(request.url)
-    if PUBLIC_BASE_URL:
-        parts = urlsplit(raw_url)
-        pub   = urlsplit(PUBLIC_BASE_URL)
-        raw_url = urlunsplit((pub.scheme or "https", pub.netloc, parts.path, parts.query, ""))
-
-    sig = request.headers.get("X-Twilio-Signature", "")
-    if not _validator.validate(raw_url, form, sig):
-        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
-
-    user = (form.get("From") or "").strip()  # e.g. 'whatsapp:+<user>'
-    text = (form.get("Body") or "").strip()
-    if not user or not text:
-        return ""  # 200 OK; nothing to do
-
-    # ✅ Schedule the async background work properly
-    asyncio.create_task(_process_and_reply_whatsapp(user, text))
-
-    # ACK immediately so Twilio doesn't retry
-    return ""  # immediate 200 OK
-
-
 
 #####################################------##################################################
 # --- 4. Mount Static Frontend Files (as the last step before running) ---
