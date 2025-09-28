@@ -25,7 +25,7 @@
         .hero { background: var(--secondary-blue); color: var(--text-light); padding: 15px 20px; text-align: center; flex-shrink: 0; box-shadow: inset 0 -2px 4px rgba(0,0,0,0.1); }
         .hero h2 { font-size: 1.3rem; font-weight: 500; margin-bottom: 3px; }
         .hero p { font-size: 0.95rem; max-width: 700px; margin: auto; font-weight: 300; }
-        .chat-section { flex-grow: 1; padding: 20px; display: flex; flex-direction: row; gap: 20px; min-height: 0; overflow: hidden; max-width: 1800px; width: 100%; margin: 0 auto; }
+        .chat-section { flex-grow: 1; padding: 20px; display: flex; flex-direction: row; gap: 20px; min-height: 0; overflow: hidden; max-width: 1800px; width: 100%; margin: 0 auto; position: relative; }
         .chat-container { flex: 3; min-width: 0; border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; background-color: var(--bg-white); box-shadow: 0 5px 15px rgba(0, 50, 100, 0.1); }
         #chatbox { flex-grow: 1; padding: 25px; overflow-y: auto; background: var(--bg-white); display: flex; flex-direction: column; gap: 12px; }
         #chatbox::-webkit-scrollbar { width: 8px; }
@@ -89,14 +89,32 @@
         .spinning { animation: spin 1.2s linear infinite; }
         .hidden { display: none !important; }
         #show-logs-btn {
-            position: fixed; bottom: 20px; right: 20px; z-index: 1000;
-            background-color: var(--primary-blue); color: var(--text-light);
-            border: 1px solid var(--text-light); border-radius: 8px; padding: 10px 16px;
-            font-size: 1rem; font-weight: 500; cursor: pointer;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            position: absolute; /* Position relative to .chat-section */
+            top: 0;
+            right: 0; /* Attach to the right edge of the section */
+            z-index: 1000;
+
+            /* --- Vertical Tab Styling --- */
+            writing-mode: vertical-rl; /* Makes text vertical */
+            text-orientation: mixed;
+
+            background-color: var(--primary-blue);
+            color: var(--text-light);
+            border: none;
+            border-radius: 0 0 8px 8px; /* Rounds the 'bottom' corners */
+            padding: 16px 12px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            box-shadow: -2px 2px 8px rgba(0,0,0,0.15); /* Adjust shadow for new orientation */
             transition: all 0.2s ease-in-out;
         }
-        #show-logs-btn:hover { background-color: var(--secondary-blue); transform: translateY(-2px); }
+
+        #show-logs-btn:hover {
+            background-color: var(--secondary-blue);
+            transform: none; /* Remove old hover effect */
+            padding-right: 15px; /* Nudge button out for a clean hover effect */
+        }
     </style>
 </head>
 <body>
@@ -126,9 +144,10 @@
             </div>
             <div id="log-box"></div>
         </div>
-    </section>
+        <button id="show-logs-btn" class="hidden">Show Logs</button>
 
-    <button id="show-logs-btn" class="hidden">Show Logs</button>
+
+    
 
     <script>
     // --- 1. Element References ---
