@@ -499,6 +499,7 @@ custom_sql_agent_prompt = ChatPromptTemplate.from_messages(
             1.  **DATE FILTERING** **THIS IS NON NEGOTIABLE** NEVER USE MAX() FUNCTION TO CAPTURE LATEST DATES  , ALWAYS RETRIEVE ALL DATA , only filter by a specific date when the user and planner explicitly requests it.   
             2.  **Nulls**: Never clean the data of missing values, as null values themselves are informative and should be reported as is.
             3. **OUTPUT** : output should always come from the execute_sql_and_get_results tool, never add conversational bits in your response , only forward the data as is , the synthesis agent will take care of the final answer formatting.
+            4.  **CRITICAL JOIN RESTRICTION**: Never join the `ORDERS` table with the `MTL_CATS` table. This creates a many-to-many join that will cause a fan-out problem and lead to incorrect aggregate calculations. Query these tables separately.
             """,
         ),
         ("human", "Here is the full plan:\n{full_plan}\n\nExecute the SQL portion of this plan now."),
