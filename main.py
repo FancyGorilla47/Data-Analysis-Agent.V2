@@ -27,13 +27,17 @@ from langgraph.graph import StateGraph, END
 from langchain_core.prompts import PromptTemplate
 import operator
 from langchain_core.output_parsers import StrOutputParser
-from typing import List
+from typing import List, Dict, Any, Optional
+from decimal import Decimal
+from scipy import stats
+from sklearn import preprocessing
 import io
 import sys
 import pandas as pd
 import numpy as np
 import collections
 import datetime
+import math
 import statistics
 import json
 import re
@@ -658,35 +662,43 @@ def python_agent_node(state: AgentState):
 
     exec_globals = {
     "__builtins__": {
-        # Functions we want to allow from the standard library
-        "__import__": safe_import, 
-        "print": print, 
-        "len": len, 
-        "range": range,
-        "str": str, 
-        "int": int, 
-        "float": float, 
-        "list": list, 
-        "dict": dict, 
-        "set": set,
-        "round": round, 
-        "max": max, 
-        "min": min, 
-        "sum": sum, 
-        "abs": abs,
-        "enumerate": enumerate, # <-- ADDED
-        "zip": zip, # <-- ADDED
-        "isinstance": isinstance, # <-- ADDED
-        # Error types to catch
+        # --- Core Data Types ---
+        "dict": dict, "list": list, "set": set, "str": str, "int": int,
+        "float": float, "tuple": tuple, "bool": bool,
+
+        # --- Numeric Operations ---
+        "abs": abs, "max": max, "min": min, "sum": sum, "round": round, "pow": pow,
+
+        # --- Iteration & Data Structures ---
+        "all": all, "any": any, "enumerate": enumerate, "len": len, "range": range,
+        "reversed": reversed, "sorted": sorted, "zip": zip,
+
+        # --- Type Checking & Utility ---
+        "isinstance": isinstance, "type": type, "print": print,
+        "__import__": safe_import,
+
+        # --- Error Types ---
         "Exception": Exception, "ValueError": ValueError, "TypeError": TypeError,
         "NameError": NameError, "AttributeError": AttributeError, "KeyError": KeyError,
+
+        # --- ADDED FOR ADVANCED TYPING & DATA HANDLING ---
+        "List": List, "Dict": Dict, "Any": Any, "Optional": Optional,
+        "Decimal": Decimal,
     },
-    # Modules to make directly available
-    "pd": pd, 
-    "np": np, 
-    "re": re, 
-    "statistics": statistics, 
-    "collections": collections,
+    # --- Allowed Modules ---
+    "pd": pd, "np": np, "re": re, "statistics": statistics,
+    "collections": collections, "datetime": datetime, "math": math, "json": json,
+
+    # --- ADDED FOR ADVANCED ANALYSIS (SPECIFIC FUNCTIONS) ---
+    # Scipy Stats
+    "pearsonr": stats.pearsonr,
+    "ttest_ind": stats.ttest_ind,
+    "chi2_contingency": stats.chi2_contingency,
+    
+    # Scikit-learn Preprocessing
+    "MinMaxScaler": preprocessing.MinMaxScaler,
+    "StandardScaler": preprocessing.StandardScaler,
+    "OneHotEncoder": preprocessing.OneHotEncoder,
 }
 
     exec_locals = {}

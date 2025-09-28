@@ -25,3 +25,5 @@ cerberus
 tabulate
 prettytable
 texttable
+scipy
+scikit-learn
