@@ -234,7 +234,7 @@ def safe_import(name, globals=None, locals=None, fromlist=(), level=0):
     """
     ALLOWED_IMPORTS = {
     # 🔢 Core Data Manipulation
-    'pandas', 'numpy',
+    'pandas', 'numpy','decimal',
 
     # 📈 Statistical & Scientific Analysis
     'statistics', 'math', 'scipy', 'statsmodels', 'scipy.stats', 
